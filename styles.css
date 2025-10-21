@@ -1,25 +1,30 @@
 h1 {
-    font-size: 1.2 rem;
+    font-size: 1.2rem;
 }
 h2 {
-    font-size: 1.1 rem;
+    font-size: 1.1rem;
 }
 
 h3 {
-    font-size: 1.1 rem;
+    font-size: 1.1rem;
 }
 
 h4 {
-    font-size: 1 rem;
+    font-size: 1rem;
     font-weight: 500;
 }
 
 h5 {
     margin-top: 10px;
-    font-size: 0.9 rem;
+    font-size: 0.9rem;
     font-weight: 500;
 }
 
 .sci-name {
     font-style:italic;
+}
+
+.diminish-text {
+    font-size: 0.8rem;
+    font-style: italic;
 }

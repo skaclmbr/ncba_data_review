@@ -45,7 +45,7 @@ nc_obs_zoom <- 13
 ncba_blue <- "#2a3b4d"
 ncba_white <- "#ffffff"
 
-category_colors <- c("#6a51a3", "#9e9ac8","#cbc9e2", "#F2F0F7")
+category_colors <- c("#6a51a3", "#9e9ac8", "#cbc9e2", "#F2F0F7")
 breeding_category_pal <- colorFactor(
   palette = category_colors,
   domain = breeding_categories
@@ -61,7 +61,6 @@ ui <- fluidPage(
     "NCBA Data Review",
     windowTitle = "NCBA Data Review",
     tags$head(includeCSS("styles.css")),
-    actionButton("login", "login to app"),
     tabPanel(
       "Species",
       sidebarLayout(
@@ -69,28 +68,73 @@ ui <- fluidPage(
           width = 3,
           selectizeInput(
             "spp_select",
-            h3("Species"),
+            h4("SelectSpecies"),
             choices = species_list, options = list(
               placeholder = "Select species",
               onInitialize = I('function() {this.setValue("Black-throated Green Warbler"); }')
             )
           ),
           card(
-            card_header("Observation Data"),
-            htmlOutput(outputId = "observation_data")
-          )
+              tags$span(
+                class = "diminish-text",
+                htmlOutput("user_info")
+              ),
+              div(class = "pull-right", shinyauthr::logoutUI(id = "logout")),
+              shinyauthr::loginUI(id = "login")
+            ),
         ),
         mainPanel(
           layout_columns(
             card(
-              card_header("Species Codes Timeline"),
-              uiOutput(outputId = "boxplot_or_message")
+              tabsetPanel(
+                tabPanel(
+                  "Boxplot",
+                  uiOutput(
+                    outputId = "boxplot_or_message"
+                  )
+                ),
+                tabPanel("Flagged","")
+              )
             ),
             card(
               card_header("Observations"),
               leafletOutput(outputId = "obs_map")
             ),
             col_widths = c(8,4)
+          ),
+          layout_columns(
+            card(
+              card_header("Observation Data"),
+              htmlOutput(outputId = "observation_data")
+            ),
+            card(
+              card_header("Review Results"),
+              tags$span(
+                class = "diminish-text",
+                htmlOutput("review_record_id")
+              ),
+              selectizeInput(
+                "breeding_code_select",
+                "New Breeding Code",
+                choices = breeding_code_select_list, options = list(
+                  placeholder = "Select Reason"
+                )
+
+              ),
+              selectizeInput(
+                "bba_reason_select",
+                "BBA Reason",
+                choices = bba_review_reasons$reason, options = list(
+                  placeholder = "Select Reason"
+                )
+
+              ),
+              textAreaInput(
+                "review_notes_text",
+                "Notes",
+              ),
+              actionButton("update_record", "Update")
+            )
           )
         )
       )
@@ -99,7 +143,52 @@ ui <- fluidPage(
   )
 )
 
+############################################################################
+## SERVER
+
 server <- function(input, output, session) {
+
+  # call login module supplying data frame, 
+  # user and password cols and reactive trigger
+  credentials <- shinyauthr::loginServer(
+    id = "login",
+    data = user_base,
+    user_col = user,
+    pwd_col = password,
+    log_out = reactive(logout_init())
+  )
+
+  # load forms when logged in
+  # observeEvent(
+  #   credentials()$user_auth,
+  #   {
+  #     req(credentials()$user_auth)
+  #     updateSelectizeInput(
+  #       session,
+  #       "spp_select",
+  #       choices = species_list,
+  #       selected = "Black-throated Green Warbler" # for testing
+  #     )
+  #   }
+  # )
+  # call the logout module with reactive trigger to hide/show
+  logout_init <- shinyauthr::logoutServer(
+    id = "logout",
+    active = reactive(credentials()$user_auth)
+  )
+
+  observeEvent(
+    credentials()$user_auth,
+    {
+      req(credentials()$user_auth)
+      output$user_info <- renderUI(
+        {
+          HTML(paste("logged in as:", credentials()$info$name))
+        }
+      )
+      ## INSERT CODE TO BLANK OUT GRAPHS?
+    }
+  )
 
   # store current info
   form_data <- reactiveValues(
@@ -114,6 +203,7 @@ server <- function(input, output, session) {
   ## OBS MAP
   # display species map
   output$obs_map <- renderLeaflet({
+    # req(credentials()$user_auth) # for production
     leaflet() %>%
       setView(
         lng = nc_center_lng,
@@ -151,6 +241,7 @@ server <- function(input, output, session) {
   observeEvent(
     input$spp_select,
     {
+      # req(credentials()$user_auth) # for production
       form_data$species <- input$spp_select
       form_data$observation <- NULL
 
@@ -204,17 +295,16 @@ server <- function(input, output, session) {
                     data_id = guid,
                     onclick = paste0(
                       'Shiny.onInputChange("obs_clicked","', guid, '")'
-                    )
+                    ),
                   ),
                   show.legend = FALSE,
                   position = position_jitter(
-                    width = 0.2,
-                    height = 0.2
+                    width = 0.3,
+                    height = 0.3
                   )
                 ) +
                 xlim(0, 365) +
-                theme_minimal() +
-                labs(title = form_data$species)
+                theme_minimal()
 
               girafe(
                 ggobj = gg_point,
@@ -236,10 +326,6 @@ server <- function(input, output, session) {
               lat = ~ LATITUDE,
               lng = ~ LONGITUDE,
               radius = 5,
-              # clusterOptions = markerClusterOptions(
-              #   maxClusterRadius = 10,
-              #   spiderfiyDistanceMultiplier = 2
-              # ),
               opacity = 1,
               stroke = TRUE,
               color = ncba_white,
@@ -273,10 +359,14 @@ server <- function(input, output, session) {
     }
   )
   
+  #########################################################################
+  ## Display selected Observation Details
   # listen for form_data changes
   observeEvent(
     form_data$observation,
     {
+      # req(credentials()$user_auth) # for production
+
       if (is.null(form_data$observation)) {
         output$observation_data <- renderUI(HTML(""))
 
@@ -291,7 +381,20 @@ server <- function(input, output, session) {
       } else {
         # retrieve obs_data
         obs_data <- retrieve_obs_data(form_data$observation)
-        print(obs_data)
+        form_data$checklist <- obs_data$sei
+
+        # update review results card
+        output$review_record_id <- renderUI(
+          {
+            record_id <- paste0(
+              '<a href="https://ebird.org/checklists/', form_data$checklist,
+              '" target = "_blank">', 
+              form_data$checklist, ' (', form_data$observation, ')</a>'
+            )
+            HTML(record_id)
+          }
+        )
+
 
         # update observation data
         output$observation_data <- renderUI(
@@ -344,6 +447,10 @@ server <- function(input, output, session) {
     },
     ignoreNULL = FALSE
   )
+  
+  #########################################################################
+  ## Record Update actions
+  # bindEvent(input$update_record)
 }
 
 shinyApp(ui, server)

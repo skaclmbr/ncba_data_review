@@ -44,12 +44,10 @@ nc_block_zoom <- 13
 nc_obs_zoom <- 13
 ncba_blue <- "#2a3b4d"
 ncba_white <- "#ffffff"
-# category_colors <- paletteer_d("lisa::FridaKahlo", n = 4)
+
 category_colors <- c("#6a51a3", "#9e9ac8","#cbc9e2", "#F2F0F7")
 breeding_category_pal <- colorFactor(
   palette = category_colors,
-  # palette = c("#121510FF", "#6D8325FF", "#D6CFB7FF", "#E5AD4FFF"),
-  # palette = paletteer_d("lisa::FridaKahlo")[1:4],
   domain = breeding_categories
 )
 

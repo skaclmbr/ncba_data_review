@@ -8,6 +8,8 @@ if(!require(shiny)) install.packages(
   "shiny", repos = "http://cran.us.r-project.org")
 if(!require(shinythemes)) install.packages(
   "shinythemes", repos = "http://cran.us.r-project.org")
+if(!require(shinyauthr)) install.packages(
+  "shinyauthr", repos = "http://cran.us.r-project.org")
 if(!require(htmltools)) install.packages(
   "htmltools", repos = "http://cran.us.r-project.org")
 if(!require(bslib)) install.packages(
@@ -61,6 +63,7 @@ ui <- fluidPage(
     "NCBA Data Review",
     windowTitle = "NCBA Data Review",
     tags$head(includeCSS("styles.css")),
+    actionButton("login", "login to app"),
     tabPanel(
       "Species",
       sidebarLayout(

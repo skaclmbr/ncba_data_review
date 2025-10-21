@@ -1,24 +1,24 @@
 code,category,description,category_name
-F,C1,Flyover,Observed
-H,C2,In Habitat,Possible
-S,C2,Singing,Possible
-A,C3,Agitated Behavior,Probable
-B,C3,Nest-Building by Wrens or Woodpeckers,Probable
-C,C3,Courtship, Display, or Copulation,Probable
-M,C3,Multiple (7+) Singing Birds,Probable
-N,C3,Visiting Probable Nest Site,Probable
-P,C3,Pair in Suitable Habitat,Probable
-S7,C3,Singing Bird Present 7+ Days,Probable
-T,C3,Territorial Defense,Probable
-CF,C4,Carrying Food,Confirmed
-CN,C4,Carrying Nesting Material,Confirmed
-DD,C4,Distraction Display,Confirmed
-FL,C4,Recently Fledged Young,Confirmed
-FS,C4,Carrying Fecal Sac,Confirmed
-FY,C4,Feeding Young,Confirmed
-NB,C4,Nest-Building (not Wrens or Woodpeckers),Confirmed
-NE,C4,Nest with Eggs,Confirmed
-NY,C4,Nest with Young,Confirmed
-ON,C4,Occupied Nest,Confirmed
-PE,C4,Physiological Evidence ,Confirmed
-UN,C4,Used Nest,Confirmed
+F,C1,"Flyover",Observed
+H,C2,"In Habitat",Possible
+S,C2,"Singing",Possible
+A,C3,"Agitated Behavior",Probable
+B,C3,"Nest-Building by Wrens or Woodpeckers",Probable
+C,C3,"Courtship, Display, or Copulation",Probable
+M,C3,"Multiple (7+) Singing Birds",Probable
+N,C3,"Visiting Probable Nest Site",Probable
+P,C3,"Pair in Suitable Habitat",Probable
+S7,C3,"Singing Bird Present 7+ Days",Probable
+T,C3,"Territorial Defense",Probable
+CF,C4,"Carrying Food",Confirmed
+CN,C4,"Carrying Nesting Material",Confirmed
+DD,C4,"Distraction Display",Confirmed
+FL,C4,"Recently Fledged Young",Confirmed
+FS,C4,"Carrying Fecal Sac",Confirmed
+FY,C4,"Feeding Young",Confirmed
+NB,C4,"Nest-Building (not Wrens or Woodpeckers)",Confirmed
+NE,C4,"Nest with Eggs",Confirmed
+NY,C4,"Nest with Young",Confirmed
+ON,C4,"Occupied Nest",Confirmed
+PE,C4,"Physiological Evidence",Confirmed
+UN,C4,"Used Nest",Confirmed

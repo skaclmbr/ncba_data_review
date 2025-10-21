@@ -18,7 +18,8 @@ dec_places <- function(num, digits = 2, ...) {
 # this is a read only account
 HOST = "cluster0-shard-00-00.rzpx8.mongodb.net:27017"
 DB = "ebd_mgmt"
-COLLECTION = "ebd"
+COLLECTION = "ebd_test" # testing
+# COLLECTION = "ebd" # production
 source("ncba_config.r")
 # other relevant collections include: blocks and ebd_taxonomy
 
@@ -82,15 +83,42 @@ aggregate_ebd_data <- function(pipeline) {
   return(mongodata)
 }
 
+update_review_record <- function(guid, update_code) {
+  print("update_review_record runs!")
+  filter <- paste0(
+    '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}'
+  )
+  
+  array_filter <- paste0('[{"elem.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}]')
+
+  result <- m$update(
+    query = filter,
+    update = update_code,
+    filters = array_filter,
+    multiple = FALSE
+  )
+
+  return(result)
+}
+
 
 bba_review_reasons <- read.csv("bba_review_reasons.csv")
 
+
+## BREEDING CODE LISTS
 breeding_codes <- read.csv("breeding_codes.csv")
 breeding_codes <- breeding_codes %>%
   mutate(
     select_label = paste0(description, " (", code, ")")
   )
 
-breeding_code_select_list <- breeding_codes %>%
-  split(breeding_codes$category_name) %>%
-  lapply(function(x) split(x, x$select_label))
+breeding_category_names <- unique(breeding_codes$category_name)
+
+breeding_code_select_list <- split(
+  breeding_codes$code,
+  breeding_category_names
+)
+get_breeding_category <- function(code) {
+  result <- breeding_codes[breeding_codes$code == code,]$category
+  result
+}

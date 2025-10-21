@@ -100,7 +100,7 @@ ui <- fluidPage(
               card_header("Observations"),
               leafletOutput(outputId = "obs_map")
             ),
-            col_widths = c(8,4)
+            col_widths = c(8, 4)
           ),
           layout_columns(
             card(
@@ -108,7 +108,7 @@ ui <- fluidPage(
               htmlOutput(outputId = "observation_data")
             ),
             card(
-              card_header("Review Results"),
+              card_header(uiOutput(outputId = "review_card_header")),
               tags$span(
                 class = "diminish-text",
                 htmlOutput("review_record_id")
@@ -117,15 +117,16 @@ ui <- fluidPage(
                 "breeding_code_select",
                 "New Breeding Code",
                 choices = breeding_code_select_list, options = list(
-                  placeholder = "Select Reason"
+                  placeholder = "Select Breeding Code",
+                  selected = NULL
                 )
-
               ),
               selectizeInput(
                 "bba_reason_select",
                 "BBA Reason",
                 choices = bba_review_reasons$reason, options = list(
-                  placeholder = "Select Reason"
+                  placeholder = "Select Reason",
+                  selected = NULL
                 )
 
               ),
@@ -158,19 +159,6 @@ server <- function(input, output, session) {
     log_out = reactive(logout_init())
   )
 
-  # load forms when logged in
-  # observeEvent(
-  #   credentials()$user_auth,
-  #   {
-  #     req(credentials()$user_auth)
-  #     updateSelectizeInput(
-  #       session,
-  #       "spp_select",
-  #       choices = species_list,
-  #       selected = "Black-throated Green Warbler" # for testing
-  #     )
-  #   }
-  # )
   # call the logout module with reactive trigger to hide/show
   logout_init <- shinyauthr::logoutServer(
     id = "logout",
@@ -186,6 +174,10 @@ server <- function(input, output, session) {
           HTML(paste("logged in as:", credentials()$info$name))
         }
       )
+
+      output$review_card_header <- renderUI({
+        HTML("Review Results")
+      })
       ## INSERT CODE TO BLANK OUT GRAPHS?
     }
   )
@@ -196,7 +188,8 @@ server <- function(input, output, session) {
     block = NULL,
     checklist = NULL,
     observation = NULL,
-    obs_data = NULL
+    obs_record = NULL,
+    all_obs_data = NULL
   )
 
   #######################################################################
@@ -247,7 +240,7 @@ server <- function(input, output, session) {
 
       ## No Selection
       if (is.null(input$spp_select) | input$spp_select == "") {
-        form_data$obs_data <- NULL
+        form_data$all_obs_data <- NULL
 
         # clear map
         leafletProxy("obs_map", session) %>%
@@ -259,16 +252,16 @@ server <- function(input, output, session) {
         )
       } else {
         # species is selected, see if there is data
-        form_data$obs_data <- retrieve_observations(input$spp_select)
+        form_data$all_obs_data <- retrieve_observations(input$spp_select)
 
-        if (nrow(form_data$obs_data) > 0) {
-          od <- form_data$obs_data
+        if (nrow(form_data$all_obs_data) > 0) {
+          od <- form_data$all_obs_data
 
           ###############################
           ## Add observations to the boxplot
           output$boxplot_or_message <- renderUI({renderGirafe(
             {
-              od <- form_data$obs_data
+              od <- form_data$all_obs_data
 
               gg_point <- ggplot(
                 data = od,
@@ -344,7 +337,7 @@ server <- function(input, output, session) {
             )
         } else {
           # no records found
-          form_data$obs_data <- NULL
+          form_data$all_obs_data <- NULL
 
           # clear map
           leafletProxy("obs_map", session) %>%
@@ -379,9 +372,10 @@ server <- function(input, output, session) {
           )
 
       } else {
-        # retrieve obs_data
-        obs_data <- retrieve_obs_data(form_data$observation)
-        form_data$checklist <- obs_data$sei
+        # retrieve obs_record
+        obs_record <- retrieve_obs_data(form_data$observation)
+        form_data$checklist <- obs_record$sei
+        form_data$obs_record <- obs_record
 
         # update review results card
         output$review_record_id <- renderUI(
@@ -400,7 +394,7 @@ server <- function(input, output, session) {
         output$observation_data <- renderUI(
           {
             out_html <- with(
-              obs_data,
+              obs_record,
               paste0(
                 '<p><a href = "https://ebird.org/checklists/',
                 sei, '" target="blank" title="', sei, 
@@ -423,8 +417,8 @@ server <- function(input, output, session) {
         )
 
         # zoom map to obs
-        latitude <- obs_data[1, "LATITUDE"]
-        longitude <- obs_data[1, "LONGITUDE"]
+        latitude <- obs_record[1, "LATITUDE"]
+        longitude <- obs_record[1, "LONGITUDE"]
         leafletProxy("obs_map", session) %>%
           setView(
             lat = latitude,
@@ -443,14 +437,69 @@ server <- function(input, output, session) {
             group = "highlight"
           )
       }
-
+      print(form_data$obs_record)
     },
     ignoreNULL = FALSE
   )
   
   #########################################################################
   ## Record Update actions
-  # bindEvent(input$update_record)
+  
+  # add code here to vet record before uploading to mongodb
+
+  observeEvent(
+    input$update_record,
+    {
+
+      error_text <- ""
+      success <- FALSE
+      print(input$breeding_code_select)
+      print(form_data$obs_record)
+      print(form_data$obs_record$breeding_code)
+      # error checking for data entry form
+      if (input$breeding_code_select == NULL) {
+        error_text <- paste0(
+          ' <span class = "red-text">Please select a different breeding code.'
+        )
+      } else if (input$breeding_code_select == form_data$obs_record$breeding_code) {
+        error_text <- paste0(
+          ' <span class = "red-text">Please select a different breeding code.'
+        )
+      } else if (!(credentials()$user_auth)) {
+        error_text <- paste0(
+          ' <span class = "red-text">Please sign in.'
+        )
+      } else {
+        success <- TRUE
+      }
+
+      if (success) {
+        update_code <- paste0(
+          '{
+            "$set" : {
+              "OBSERVATIONS.$[elem].NCBA_REVIEW" : {
+                "REVIEWER" : "', credentials()$info$user_name, '",
+                "REVIEW_DATE_TIME" : "', date(), '",
+                "BREEDING_CODE" : "', input$breeding_code_select, '",
+                "BREEDING_CATEGORY" : "',
+                get_breeding_category(form_data$obs_record$breeding_code),
+                '", "BBA_REASON" : "', input$bba_reason_select, '",
+                "NOTES" : "', input$review_notes_text, '"
+              }
+            }
+          }'
+        )
+        response <- update_review_record(form_data$observation, update_code)
+      }
+
+      output$review_card_header <- uiOutput({
+        HTML(paste0("Review Results", error_text))
+      })
+      
+    }
+  )
+
+
 }
 
 shinyApp(ui, server)

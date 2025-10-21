@@ -28,3 +28,7 @@ h5 {
     font-size: 0.8rem;
     font-style: italic;
 }
+
+.red-text {
+    color: red;
+}

@@ -437,7 +437,6 @@ server <- function(input, output, session) {
             group = "highlight"
           )
       }
-      print(form_data$obs_record)
     },
     ignoreNULL = FALSE
   )

@@ -5,9 +5,9 @@ account: ncbirdconservation
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 15813501
-bundleId: 11069882
+bundleId: 11069938
 url: https://ncbirdconservation.shinyapps.io/ncba_data_review/
 version: 1
 asMultiple: FALSE
 asStatic: FALSE
-ignoredFiles: test.r|test_breeding_codes.r|test2.r|users.csv|utils_test.r
+ignoredFiles: test.r|test_breeding_codes.r|test2.r|utils_test.r

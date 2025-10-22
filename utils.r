@@ -74,6 +74,27 @@ species_list <- sort(
   )$PRIMARY_COM_NAME, decreasing = FALSE
 )
 
+breeding_categories <- c(
+  "Confirmed",
+  "Probable",
+  "Possible",
+  "Observed"
+)
+
+categorycolors <- c(
+  "Observed" = "#f2f0f7",
+  "Possible" = "#cbc9e2",
+  "Probable" = "#9e9ac8",
+  "Confirmed" = "#6a51a3"
+)
+
+get_category <- function(breeding_code) {
+  return(codecategory[breeding_code])
+}
+
+get_category_color <- function(breeding_code) {
+  return(categorycolors[get_category(breeding_code)])
+} 
 
 aggregate_ebd_data <- function(pipeline) {
   # Perform aggregation on ebd collection in MongoDB Atlas implementation

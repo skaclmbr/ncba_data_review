@@ -47,6 +47,11 @@ m_users <- mongo(
   url = URI,
   options = ssl_options(weak_cert_validation = T))
 
+m_blocks <- mongo(
+  "blocks",
+  url = URI,
+  options = ssl_options(weak_cert_validation = T))
+
 # Get User List
 user_list <- function() {
   result <- m_users$find('{}','{}')
@@ -101,6 +106,146 @@ update_review_record <- function(guid, update_code) {
   return(result)
 }
 
+
+get_observations <- function(species) {
+  # Perform aggregation on ebd collection in MongoDB Atlas implementation
+  #
+  # Description:
+  #   Returns all records with breeding codes in the NCBA Portal/Project
+  #
+  # Arguments:
+  # species -- common name of the species records to be retrieved
+
+  pipeline <- paste0('[
+    {
+      "$match" : {
+        "PROJECT_CODE" : "EBIRD_ATL_NC",
+        "PRIORITY_BLOCK" : "1",
+        "OBSERVATIONS.COMMON_NAME" : "', species, '"
+      }
+    },
+    {
+      "$unwind" : {
+        "path" : "$OBSERVATIONS"
+      }
+    },
+    {
+      "$match" : {
+        "OBSERVATIONS.BREEDING_CODE" : {"$ne": ""},
+        "OBSERVATIONS.COMMON_NAME" : "', species, '"
+      }
+    },
+    {
+      "$project" : {
+        "julian_day" : "$NCBA_JULIAN_DAY",
+        "breeding_code" : "$OBSERVATIONS.BREEDING_CODE",
+        "sei" : "$_id",
+        "guid" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
+        "LATITUDE" : 1,
+        "LONGITUDE" : 1,
+        "LOCALITY" : 1,
+        "OBSERVATION_DATE" : 1,
+        "_id" : 0
+      }
+    }
+  ]')
+
+  obs_records <- aggregate_ebd_data(pipeline)
+  if (nrow(obs_records) > 0) {
+    obs_records <- obs_records %>%
+      mutate(
+        breeding_category = get_category(obs_records$breeding_code)
+      ) %>%
+      mutate(
+        ebird_link = paste0("https://ebird.org/checklist/", sei),
+        breeding_code = factor(
+          obs_records$breeding_code, levels = codelevels, ordered = TRUE
+        )
+      )
+    }
+  return(obs_records)
+}
+
+default_obs_project <- paste0('{
+    "sei" : "$SAMPLING_EVENT_IDENTIFIER",
+    "guid" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
+    "OBSERVATION_DATE" : 1,
+    "NCBA_JULIAN_DAY" : 1,
+    "TIME_OBSERVATIONS_STARTED" : 1,
+    "COUNTY" : 1,
+    "ID_NCBA_BLOCK" : 1,
+    "OBSERVER_ID" : 1,
+    "NCBA_OBSERVER" : 1,
+    "PROTOCOL_TYPE" : 1,
+    "DURATION_MINUTES" : 1,
+    "EFFORT_DISTANCE_KM" : 1,
+    "NUMBER_OBSERVERS" : 1,
+    "COMMON_NAME" : "$OBSERVATIONS.COMMON_NAME",
+    "SCIENTFIC_NAME" : "$OBSERVATIONS.SCIENTIFIC_NAME",
+    "BREEDING_CODE" : "$OBSERVATIONS.BREEDING_CODE",
+    "BREEDING_CATEGORY" : "$OBSERVATIONS.BREEDING_CATEGORY",
+    "BEHAVIOR_CODE" : "$OBSERVATIONS.BEHAVIOR_CODE",
+    "SPECIES_COMMENTS" : "$OBSERVATIONS.SPECIES_COMMENTS",
+    "HAS_MEDIA" : "$OBSERVATIONS.HAS_MEDIA",
+    "LOCALITY" : 1,
+    "LATITUDE": 1,
+    "LONGITUDE" : 1,
+    "_id" : 0
+  }'
+)
+
+get_obs_record <- function(guid, project = default_obs_project) {
+  # Retrieve observation data record
+  #
+  # Description:
+  #   Returns records resulting from the passed aggregation pipeline
+  #
+  # Arguments:
+  # guid -- valid GLOBAL_UNIQUE_IDENTIFIER
+  # project -- valid JSON of fields to be returned
+
+  pipeline <- paste0(
+    '[
+      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}},
+      {"$unwind" : {"path" : "$OBSERVATIONS"}},
+      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}},
+      {"$project": ', project, '}
+    ]'
+  )
+  results <- aggregate_ebd_data(pipeline)
+
+  return(results[1,])
+
+}
+
+## BLOCKS
+
+get_blocks <- function() {
+  filter <- paste0(
+    '{
+      "ID_NCBA_BLOCK" : 1,
+      "COUNTY" : 1,
+      "ID_BLOCK_CODE" : 1,
+      "PRIORITY" : 1,
+      "ID_EBD_NAME" : 1,
+      "ECOREGION" : 1,
+    }'
+  )
+
+  results <- m_blocks$find('{}', filter)
+
+  return(results)
+}
+
+# block_data <- get_blocks()
+# county_ecoregion <- blocks %>%
+
+
+# get_ecoregion <- function(county) {
+#   return()
+# }
+
+## BBA REVEIW REASONS
 
 bba_review_reasons <- read.csv("bba_review_reasons.csv")
 

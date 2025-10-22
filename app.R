@@ -252,7 +252,7 @@ server <- function(input, output, session) {
         )
       } else {
         # species is selected, see if there is data
-        form_data$all_obs_data <- retrieve_observations(input$spp_select)
+        form_data$all_obs_data <- get_observations(input$spp_select)
 
         if (nrow(form_data$all_obs_data) > 0) {
           od <- form_data$all_obs_data
@@ -373,7 +373,7 @@ server <- function(input, output, session) {
 
       } else {
         # retrieve obs_record
-        obs_record <- retrieve_obs_data(form_data$observation)
+        obs_record <- get_obs_record(form_data$observation)
         form_data$checklist <- obs_record$sei
         form_data$obs_record <- obs_record
 
@@ -452,37 +452,37 @@ server <- function(input, output, session) {
     {
 
       error_text <- ""
-      success <- FALSE
-      print(input$breeding_code_select)
-      print(form_data$obs_record)
-      print(form_data$obs_record$breeding_code)
-      # error checking for data entry form
-      if (input$breeding_code_select == NULL) {
-        error_text <- paste0(
-          ' <span class = "red-text">Please select a different breeding code.'
-        )
-      } else if (input$breeding_code_select == form_data$obs_record$breeding_code) {
-        error_text <- paste0(
-          ' <span class = "red-text">Please select a different breeding code.'
-        )
-      } else if (!(credentials()$user_auth)) {
-        error_text <- paste0(
-          ' <span class = "red-text">Please sign in.'
-        )
-      } else {
-        success <- TRUE
-      }
+      success <- TRUE
+      # success <- FALSE
+      # print(input$breeding_code_select)
+      # print(form_data$obs_record$BREEDING_CODE)
+      # # error checking for data entry form
+      # if (input$breeding_code_select == NULL) {
+      #   error_text <- paste0(
+      #     ' <span class = "red-text">Please select a different breeding code.'
+      #   )
+      # } else if (input$breeding_code_select == form_data$obs_record$BREEDING_CODE) {
+      #   error_text <- paste0(
+      #     ' <span class = "red-text">Please select a different breeding code.'
+      #   )
+      # } else if (!(credentials()$user_auth)) {
+      #   error_text <- paste0(
+      #     ' <span class = "red-text">Please sign in.'
+      #   )
+      # } else {
+      #   success <- TRUE
+      # }
 
       if (success) {
         update_code <- paste0(
           '{
             "$set" : {
               "OBSERVATIONS.$[elem].NCBA_REVIEW" : {
-                "REVIEWER" : "', credentials()$info$user_name, '",
+                "REVIEWER" : "', credentials()$info$name, '",
                 "REVIEW_DATE_TIME" : "', date(), '",
                 "BREEDING_CODE" : "', input$breeding_code_select, '",
                 "BREEDING_CATEGORY" : "',
-                get_breeding_category(form_data$obs_record$breeding_code),
+                get_breeding_category(input$breeding_code_select),
                 '", "BBA_REASON" : "', input$bba_reason_select, '",
                 "NOTES" : "', input$review_notes_text, '"
               }
@@ -492,9 +492,9 @@ server <- function(input, output, session) {
         response <- update_review_record(form_data$observation, update_code)
       }
 
-      output$review_card_header <- uiOutput({
-        HTML(paste0("Review Results", error_text))
-      })
+      # output$review_card_header <- uiOutput({
+      #   HTML(paste0("Review Results", error_text))
+      # })
       
     }
   )

@@ -26,6 +26,8 @@ if(!require(dplyr)) install.packages(
   "dplyr", repos = "http://cran.us.r-project.org")
 if(!require(DT)) install.packages(
   "DT", repos = "http://cran.us.r-project.org")
+if(!require(stringr)) install.packages(
+  "stringr", repos = "http://cran.us.r-project.org")
 
 if(!require(leaflet)) install.packages(
   "leaflet", repos = "http://cran.us.r-project.org")
@@ -51,96 +53,103 @@ breeding_category_pal <- colorFactor(
   domain = breeding_categories
 )
 
+# Helper function to create a mandatory label
+labelMandatory <- function(label) {
+  tagList(
+    label,
+    span("*", class = "mandatory_star")
+  )
+}
+
 ############################################################################
 ## UI
 
 ui <- fluidPage(
   useBusyIndicators(),
   theme = bs_theme(version = 5),
-  navbarPage(
-    "NCBA Data Review",
-    windowTitle = "NCBA Data Review",
-    tags$head(includeCSS("styles.css")),
-    tabPanel(
-      "Species",
-      sidebarLayout(
-        sidebarPanel(
-          width = 3,
-          selectizeInput(
-            "spp_select",
-            h4("SelectSpecies"),
-            choices = species_list, options = list(
-              placeholder = "Select species",
-              onInitialize = I('function() {this.setValue("Black-throated Green Warbler"); }')
-            )
-          ),
-          card(
-              tags$span(
-                class = "diminish-text",
-                htmlOutput("user_info")
-              ),
-              div(class = "pull-right", shinyauthr::logoutUI(id = "logout")),
-              shinyauthr::loginUI(id = "login")
-            ),
+  tags$head(
+    includeCSS("styles.css"),
+    tags$style(HTML(".mandatory_star { color: red; }"))
+  ),
+  windowTitle = "NCBA Data Review",
+
+  sidebarLayout(
+    sidebarPanel(
+      width = 2,
+      h3("NCBA Data Review", id = "sidebar_heading"),
+      card(
+        selectizeInput(
+          "spp_select",
+          h4("Select Species"),
+          choices = species_list, options = list(
+            placeholder = "Select species",
+            onInitialize = I('function() {this.setValue("Alder Flycatcher"); }')
+          )
         ),
-        mainPanel(
-          layout_columns(
-            card(
-              tabsetPanel(
-                tabPanel(
-                  "Boxplot",
-                  uiOutput(
-                    outputId = "boxplot_or_message"
-                  )
-                ),
-                tabPanel("Flagged","")
+        checkboxInput(
+          inputId = "safe_dates_check",
+          label = "Outside Safe Dates",
+          value = FALSE
+        ),
+        checkboxInput(
+          inputId = "region_check",
+          label = "Outside Breeding Region",
+          value = FALSE
+        )
+      ),
+      card(
+        card_header(uiOutput(outputId = "review_card_header")),
+        selectizeInput(
+          "breeding_code_select",
+          label = labelMandatory("New Breeding Code"),
+          choices = codelevels,
+          multiple = FALSE,
+          selected = NULL,
+          options = list(placeholder = "Select Breeding Code")
+        ),
+        selectizeInput(
+          "bba_reason_select",
+          label = labelMandatory("BBA Reason"),
+          choices = bba_review_reason_list,
+          multiple = FALSE,
+          selected = NULL,
+          options = list(placeholder = "Select Reason")
+        ),
+        textAreaInput(
+          "review_notes_text",
+          "Notes",
+        ),
+        actionButton("update_record", "Update")
+      ),
+      div(class = "pull-right", shinyauthr::logoutUI(id = "logout")),
+      shinyauthr::loginUI(id = "login")
+    ),
+    mainPanel(
+      layout_columns(
+        card(
+          card_header("Observations List"),
+          DTOutput("selected_obs"),
+          actionButton("clear_observation_list", "Clear"),
+
+          card(
+            card_header("Selected Observation Detail"),
+            htmlOutput(outputId = "observation_data")
+          ),
+        ),
+        card(
+          tabsetPanel(
+            tabPanel(
+              "Boxplot",
+              girafeOutput(
+                outputId = "boxplot"
               )
             ),
-            card(
-              card_header("Observations"),
-              leafletOutput(outputId = "obs_map")
-            ),
-            col_widths = c(8, 4)
+            tabPanel("Flagged", "")
           ),
-          layout_columns(
-            card(
-              card_header("Observation Data"),
-              htmlOutput(outputId = "observation_data")
-            ),
-            card(
-              card_header(uiOutput(outputId = "review_card_header")),
-              tags$span(
-                class = "diminish-text",
-                htmlOutput("review_record_id")
-              ),
-              selectizeInput(
-                "breeding_code_select",
-                "New Breeding Code",
-                choices = breeding_code_select_list, options = list(
-                  placeholder = "Select Breeding Code",
-                  selected = NULL
-                )
-              ),
-              selectizeInput(
-                "bba_reason_select",
-                "BBA Reason",
-                choices = bba_review_reasons$reason, options = list(
-                  placeholder = "Select Reason",
-                  selected = NULL
-                )
-
-              ),
-              textAreaInput(
-                "review_notes_text",
-                "Notes",
-              ),
-              actionButton("update_record", "Update")
-            )
-          )
-        )
+          leafletOutput(outputId = "obs_map")),
+        col_widths = c(4, 8)
       )
     )
-
   )
 )
 
@@ -149,13 +158,13 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
 
-  # call login module supplying data frame, 
+  # call login module supplying data frame,
   # user and password cols and reactive trigger
   credentials <- shinyauthr::loginServer(
     id = "login",
-    data = user_base,
-    user_col = user,
-    pwd_col = password,
+    data = user_base, # nolint: object_usage_linter.
+    user_col = user, # nolint: object_usage_linter.
+    pwd_col = password, # nolint: object_usage_linter.
     log_out = reactive(logout_init())
   )
 
@@ -165,13 +174,14 @@ server <- function(input, output, session) {
     active = reactive(credentials()$user_auth)
   )
 
+  ## Functions when login changes
   observeEvent(
     credentials()$user_auth,
     {
       req(credentials()$user_auth)
-      output$user_info <- renderUI(
+      output$sidebar_heading <- renderUI(
         {
-          HTML(paste("logged in as:", credentials()$info$name))
+          HTML(paste("NCBA Data Review:", credentials()$info$name))
         }
       )
 
@@ -184,19 +194,24 @@ server <- function(input, output, session) {
 
   # store current info
   form_data <- reactiveValues(
-    species = NULL,
-    block = NULL,
-    checklist = NULL,
-    observation = NULL,
-    obs_record = NULL,
-    all_obs_data = NULL
+    species = NULL, # selected species
+    species_safe_date_start_jd = NULL,
+    species_safe_date_end_jd = NULL,
+    checklist = NULL, # selected checklist
+    checklist_url = NULL, # selected checklist eBird URL
+    observation = NULL, # selected observation GUID
+    obs_record = NULL, # selected observation record (one row df)
+    all_obs_data = NULL, # df of all obs data for selected species
+    selected_obs = NULL, # df of selected observation records
+    selected_obs_ids = NULL # list of selected observation ids
+
   )
 
   #######################################################################
-  ## OBS MAP
+  ## OBS MAP SETUP
   # display species map
   output$obs_map <- renderLeaflet({
-    # req(credentials()$user_auth) # for production
+    req(credentials()$user_auth) # for production
     leaflet() %>%
       setView(
         lng = nc_center_lng,
@@ -234,7 +249,7 @@ server <- function(input, output, session) {
   observeEvent(
     input$spp_select,
     {
-      # req(credentials()$user_auth) # for production
+      req(credentials()$user_auth) # for production
       form_data$species <- input$spp_select
       form_data$observation <- NULL
 
@@ -246,48 +261,58 @@ server <- function(input, output, session) {
         leafletProxy("obs_map", session) %>%
           clearMarkers()
 
-        # render text instead of boxplot
-        output$boxplot_or_message <- renderUI(
-          h3("No Data")
-        )
       } else {
         # species is selected, see if there is data
         form_data$all_obs_data <- get_observations(input$spp_select)
 
+        # populate safe dates in form data
+        spp_sd_record <- species_codes[
+          species_codes$SPECIES == form_data$species,
+        ]
+        spp_sd_record <- spp_sd_record[1,]
+
+        form_data$species_safe_date_start_jd <-
+          spp_sd_record$SAFE_DATE_START_JD
+        form_data$species_safe_date_end_jd <-
+          spp_sd_record$SAFE_DATE_END_JD
+
+        # plot data
         if (nrow(form_data$all_obs_data) > 0) {
           od <- form_data$all_obs_data
 
           ###############################
           ## Add observations to the boxplot
-          output$boxplot_or_message <- renderUI({renderGirafe(
+          output$boxplot <- renderGirafe(
             {
+              req(input$spp_select)
+
               od <- form_data$all_obs_data
 
               gg_point <- ggplot(
                 data = od,
                 aes(
-                  x = julian_day,
-                  y = breeding_code,
+                  x = JULIAN_DAY,
+                  y = BREEDING_CODE,
                 )
               ) +
-                labs(y = "Breeding Code", x = od$julian_day) +
+                labs(y = "Breeding Code", x = od$JULIAN_DAY) +
                 geom_boxplot(
                   aes(
-                    x = julian_day,
-                    y = breeding_code,
-                    fill = breeding_category
+                    x = JULIAN_DAY,
+                    y = BREEDING_CODE,
+                    fill = BREEDING_CATEGORY
                   ),
                   show.legend = FALSE
                 ) +
                 scale_fill_manual(values = categorycolors) +
                 geom_point_interactive(
                   aes(
-                    x = julian_day,
-                    y = breeding_code,
-                    tooltip = sei,
-                    data_id = guid,
+                    x = JULIAN_DAY,
+                    y = BREEDING_CODE,
+                    tooltip = SEI,
+                    data_id = GUID,
                     onclick = paste0(
-                      'Shiny.onInputChange("obs_clicked","', guid, '")'
+                      'Shiny.onInputChange("obs_clicked","', GUID, '")'
                     ),
                   ),
                   show.legend = FALSE,
@@ -306,7 +331,7 @@ server <- function(input, output, session) {
               )
 
             }
-          )})
+          )
 
           ###############################
           ## Add observations to the map
@@ -315,7 +340,7 @@ server <- function(input, output, session) {
             clearMarkers() %>%
             addCircleMarkers(
               data = od,
-              layerId = ~ od$guid,
+              layerId = ~ od$GUID,
               lat = ~ LATITUDE,
               lng = ~ LONGITUDE,
               radius = 5,
@@ -323,15 +348,15 @@ server <- function(input, output, session) {
               stroke = TRUE,
               color = ncba_white,
               weight = 0.9,
-              fillColor = ~ breeding_category_pal(od$breeding_category),
+              fillColor = ~ breeding_category_pal(od$BREEDING_CATEGORY),
               fillOpacity = 1,
               group = "SpeciesObservations",
               label = sprintf(
                 "<strong>%s</strong><br/>%s<br/>%s<br/>%s",
-                od$sei,
+                od$SEI,
                 od$OBSERVATION_DATE,
-                od$breeding_category,
-                od$breeding_code
+                od$BREEDING_CATEGORY,
+                od$BREEDING_CODE
               ) %>%
               lapply(htmltools::HTML)
             )
@@ -343,22 +368,121 @@ server <- function(input, output, session) {
           leafletProxy("obs_map", session) %>%
             clearMarkers()
 
-          # render text instead of boxplot
-          output$boxplot_or_message <- renderUI(
-            h3("No Data")
-        )
         }
       }
     }
   )
-  
+
+  #########################################################################
+  ## Selected Observations Events
+
+  observeEvent(
+    input$boxplot_selected,
+    form_data$selected_obs_ids <- input$boxplot_selected
+  )
+
+  observeEvent(
+    form_data$selected_obs_ids,
+    {
+      # runs when selected obs is changed
+      # get obs record info
+      form_data$selected_obs <- get_obs_records(
+        form_data$selected_obs_ids,
+        form_data$species
+      )
+
+      selected_obs_list <- form_data$selected_obs %>%
+        select(
+          "SEI",
+          "OBSERVATION_DATE",
+          "BREEDING_CODE",
+          "BREEDING_CATEGORY",
+          "NC_STATUS",
+          "ECOREGION",
+          "JULIAN_DAY",
+          "EBIRD_LINK",
+          "SUITABILITY",
+          "GUID"
+        )
+
+      output$selected_obs <- renderDT({
+
+        datatable(
+          selected_obs_list,
+          colnames = c(
+            "","Checklist", "Date", "Code",
+            "Category", "Status", "Ecoregion"
+          ),
+          options = list(
+            dom = "t",
+            columnDefs = list(
+              list(
+                className = "dt-center",
+                targets = c(1, 2, 3, 4, 5, 6)
+                ),
+              list(
+                visible = TRUE,
+                targets = c(1,2,3,4,5,6)
+              ),
+              list(
+                visible = FALSE,
+                targets = "_all"
+              )
+            )
+          )
+        ) %>%
+        formatStyle(
+          columns = "OBSERVATION_DATE",
+          valueColumns = "JULIAN_DAY",
+          backgroundColor = styleInterval(
+            c(
+              form_data$species_safe_date_start_jd,
+              form_data$species_safe_date_end_jd
+            ),
+            c("red", "green", "red")
+          ),
+          color = styleInterval(
+            c(
+              form_data$species_safe_date_start_jd,
+              form_data$species_safe_date_end_jd
+            ),
+            c("black", "white", "black")
+          )
+        ) %>%
+        formatStyle(
+          columns = "BREEDING_CODE",
+          valueColumns = "SUITABILITY",
+          backgroundColor = styleEqual(
+            c("S", "U", "F"),
+            c("green", "red", "yellow")
+          ),
+          color = styleEqual(
+            c("S", "U", "F"),
+            c("white", "black", "black")
+          )
+        )
+        }
+      )
+
+    }
+  )
+
+  observeEvent(
+    input$clear_observation_list,
+    {
+      form_data$selected_obs <- NULL
+      form_data$selected <- NULL
+    }
+  )
+
+
   #########################################################################
   ## Display selected Observation Details
   # listen for form_data changes
   observeEvent(
     form_data$observation,
     {
-      # req(credentials()$user_auth) # for production
+      req(credentials()$user_auth) # for production
 
       if (is.null(form_data$observation)) {
         output$observation_data <- renderUI(HTML(""))
@@ -374,32 +498,35 @@ server <- function(input, output, session) {
       } else {
         # retrieve obs_record
         obs_record <- get_obs_record(form_data$observation)
-        form_data$checklist <- obs_record$sei
+        form_data$checklist <- obs_record$SEI
+        form_data$checklist_url <- paste0(
+          "https://ebird.org/checklist/", obs_record$SEI
+          )
         form_data$obs_record <- obs_record
 
         # update review results card
         output$review_record_id <- renderUI(
           {
             record_id <- paste0(
-              '<a href="https://ebird.org/checklists/', form_data$checklist,
-              '" target = "_blank">', 
+              '<a href="', form_data$checklist_url, '" target = "_blank">', 
               form_data$checklist, ' (', form_data$observation, ')</a>'
             )
             HTML(record_id)
           }
         )
 
-
         # update observation data
         output$observation_data <- renderUI(
           {
+            cn <- names(obs_record)
+
             out_html <- with(
               obs_record,
               paste0(
-                '<p><a href = "https://ebird.org/checklists/',
-                sei, '" target="blank" title="', sei, 
+                '<p><a href = "https://ebird.org/checklist/',
+                SEI, '" target="blank" title="', SEI, 
                 '">eBird Checklist</a> - ', ID_NCBA_BLOCK, '</p>
-                <p>', LOCALITY, '</p>
+                <p>', ifelse("LOCALITY" %in% cn, LOCALITY,""), '</p>
                 <h5>Date/Duration</h5>
                 <p>', OBSERVATION_DATE, '<br/>',
                 DURATION_MINUTES, ' minutes, ', EFFORT_DISTANCE_KM, ' km<br/>',
@@ -407,7 +534,11 @@ server <- function(input, output, session) {
                 <h5>Observation Data</h5>
                 <p>', NCBA_OBSERVER, '<br/>',
                 BREEDING_CODE, ' (',BREEDING_CATEGORY, ')<br/>',
-                ifelse(HAS_MEDIA == 1, "Has Media", ""),
+                ifelse(
+                  "HAS_MEDIA" %in% cn,
+                  ifelse(HAS_MEDIA == 1, "Has Media", ""),
+                  ""
+                ),
                 '</p><p>', SPECIES_COMMENTS, '</p>'
               )
             )
@@ -449,9 +580,11 @@ server <- function(input, output, session) {
   observeEvent(
     input$update_record,
     {
-
+      req(credentials()$user_auth)
       error_text <- ""
       success <- TRUE
+
+
       # success <- FALSE
       # print(input$breeding_code_select)
       # print(form_data$obs_record$BREEDING_CODE)

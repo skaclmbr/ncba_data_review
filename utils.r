@@ -52,6 +52,20 @@ m_blocks <- mongo(
   url = URI,
   options = ssl_options(weak_cert_validation = T))
 
+aggregate_ebd_data <- function(pipeline) {
+  # Perform aggregation on ebd collection in MongoDB Atlas implementation
+  #
+  # Description:
+  #   Returns records resulting from the passed aggregation pipeline
+  #
+  # Arguments:
+  # pipeline -- valid JSON formatted aggregation pipeline
+
+  mongodata <- m$aggregate(pipeline)
+  return(mongodata)
+}
+
+#############################################################################
 # Get User List
 user_list <- function() {
   result <- m_users$find('{}','{}')
@@ -59,6 +73,7 @@ user_list <- function() {
 }
 user_base <- user_list()
 
+#############################################################################
 # Get Species List
 get_spp_list <- function(query = "{}", filter = "{}" ) {
 
@@ -74,12 +89,30 @@ species_list <- sort(
   )$PRIMARY_COM_NAME, decreasing = FALSE
 )
 
-breeding_categories <- c(
-  "Confirmed",
-  "Probable",
-  "Possible",
-  "Observed"
+#############################################################################
+# Breeding Categories and Colors
+
+## BREEDING CODE LISTS
+breeding_codes <- read.csv("breeding_codes.csv")
+# breeding_codes <- breeding_codes %>%
+#   mutate(
+#     select_label = paste0(description, " (", code, ")")
+#   )
+codelevels <- factor(
+  c(
+    "", "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
+    "PE", "CN", "NB", "DD", "UN", "ON", "FL", "CF", "FY", "FS", "NE", "NY"
+  )
 )
+
+breeding_category_names <- unique(breeding_codes$category_name)
+
+get_breeding_category <- function(code) {
+  result <- breeding_codes[breeding_codes$code == code,]$category
+  return(result)
+}
+
+breeding_categories <- breeding_category_names
 
 categorycolors <- c(
   "Observed" = "#f2f0f7",
@@ -88,34 +121,27 @@ categorycolors <- c(
   "Confirmed" = "#6a51a3"
 )
 
-get_category <- function(breeding_code) {
-  return(codecategory[breeding_code])
+get_category <- function(BREEDING_CODE) {
+  return(
+    breeding_codes[breeding_codes$code == BREEDING_CODE,]$category_name
+  )
 }
 
-get_category_color <- function(breeding_code) {
-  return(categorycolors[get_category(breeding_code)])
+get_category_color <- function(BREEDING_CODE) {
+  return(categorycolors[get_category(BREEDING_CODE)])
 } 
 
-aggregate_ebd_data <- function(pipeline) {
-  # Perform aggregation on ebd collection in MongoDB Atlas implementation
-  #
-  # Description:
-  #   Returns records resulting from the passed aggregation pipeline
-  #
-  # Arguments:
-  # pipeline -- valid JSON formatted aggregation pipeline
 
-  mongodata <- m$aggregate(pipeline)
-  return(mongodata)
-}
+#############################################################################
+# Review Record Management
 
-update_review_record <- function(guid, update_code) {
+update_review_record <- function(GUID, update_code) {
   print("update_review_record runs!")
   filter <- paste0(
-    '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}'
+    '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}'
   )
   
-  array_filter <- paste0('[{"elem.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}]')
+  array_filter <- paste0('[{"elem.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}]')
 
   result <- m$update(
     query = filter,
@@ -127,6 +153,8 @@ update_review_record <- function(guid, update_code) {
   return(result)
 }
 
+#############################################################################
+# Observations
 
 get_observations <- function(species) {
   # Perform aggregation on ebd collection in MongoDB Atlas implementation
@@ -158,40 +186,48 @@ get_observations <- function(species) {
     },
     {
       "$project" : {
-        "julian_day" : "$NCBA_JULIAN_DAY",
-        "breeding_code" : "$OBSERVATIONS.BREEDING_CODE",
-        "sei" : "$_id",
-        "guid" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
+        "JULIAN_DAY" : "$NCBA_JULIAN_DAY",
+        "BREEDING_CODE" : "$OBSERVATIONS.BREEDING_CODE",
+        "SEI" : "$_id",
+        "GUID" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
         "LATITUDE" : 1,
         "LONGITUDE" : 1,
         "LOCALITY" : 1,
         "OBSERVATION_DATE" : 1,
+        "COUNTY" : 1,
         "_id" : 0
       }
     }
   ]')
 
-  obs_records <- aggregate_ebd_data(pipeline)
-  if (nrow(obs_records) > 0) {
-    obs_records <- obs_records %>%
+  results <- aggregate_ebd_data(pipeline)
+  if (nrow(results) > 0) {
+    # ADD BREEDING CATEGORY
+    results$BREEDING_CATEGORY <- breeding_codes$category_name[
+      match(results$BREEDING_CODE, breeding_codes$code)
+    ]
+
+    # add ecoregion if county present
+    results <- add_ecoregion_to_df(results)
+
+    # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
+    results <- results %>%
       mutate(
-        breeding_category = get_category(obs_records$breeding_code)
-      ) %>%
-      mutate(
-        ebird_link = paste0("https://ebird.org/checklist/", sei),
-        breeding_code = factor(
-          obs_records$breeding_code, levels = codelevels, ordered = TRUE
-        )
+        EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
       )
+    # add species code review data
+    results <- add_species_codes_to_df(results, species)
     }
-  return(obs_records)
+
+
+  return(results)
 }
 
 default_obs_project <- paste0('{
-    "sei" : "$SAMPLING_EVENT_IDENTIFIER",
-    "guid" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
+    "SEI" : "$SAMPLING_EVENT_IDENTIFIER",
+    "GUID" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
     "OBSERVATION_DATE" : 1,
-    "NCBA_JULIAN_DAY" : 1,
+    "JULIAN_DAY" : "$NCBA_JULIAN_DAY",
     "TIME_OBSERVATIONS_STARTED" : 1,
     "COUNTY" : 1,
     "ID_NCBA_BLOCK" : 1,
@@ -215,31 +251,88 @@ default_obs_project <- paste0('{
   }'
 )
 
-get_obs_record <- function(guid, project = default_obs_project) {
+get_obs_record <- function(GUID, project = default_obs_project) {
   # Retrieve observation data record
   #
   # Description:
   #   Returns records resulting from the passed aggregation pipeline
   #
   # Arguments:
-  # guid -- valid GLOBAL_UNIQUE_IDENTIFIER
+  # GUID -- valid GLOBAL_UNIQUE_IDENTIFIER
   # project -- valid JSON of fields to be returned
 
   pipeline <- paste0(
     '[
-      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}},
+      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
       {"$unwind" : {"path" : "$OBSERVATIONS"}},
-      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}},
+      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
       {"$project": ', project, '}
     ]'
   )
   results <- aggregate_ebd_data(pipeline)
 
+  # add ecoregion if county present
+  results <- add_ecoregion_to_df(results)
+
+  # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
+  results <- results %>%
+    mutate(
+      EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
+    )
+  # add species code review data
+  results <- add_species_codes_to_df(results, species)
+
   return(results[1,])
 
 }
+get_obs_records <- function(guids, species, project = default_obs_project) {
+  # Retrieve observation data record
+  #
+  # Description:
+  #   Returns records resulting from the passed aggregation pipeline
+  #
+  # Arguments:
+  # GUID -- list of guids
+  # project -- valid JSON of fields to be returned
 
-## BLOCKS
+  # compile filter list
+  guid_list <- '['
+  for (o in guids) {
+    guid_list <- paste0(guid_list, '"', o, '",')
+  }
+  guid_list <- substr(guid_list, 1, nchar(guid_list) - 1)
+  guid_list <- paste0(guid_list, "]")
+
+  pipeline <- paste0(
+    '[
+      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
+      "$in" : ', guid_list, '}}},
+      {"$unwind" : {"path" : "$OBSERVATIONS"}},
+      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
+      "$in" : ', guid_list, '}}},
+      {"$project": ', project, '}
+    ]'
+  )
+
+  results <- aggregate_ebd_data(pipeline)
+
+  # add ecoregion if county present
+  results <- add_ecoregion_to_df(results)
+
+  # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
+  results <- results %>%
+    mutate(
+      EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
+    )
+  # add species code review data
+  results <- add_species_codes_to_df(results, species)
+
+  return(results)
+
+}
+
+#############################################################################
+# BLOCKS
 
 get_blocks <- function() {
   filter <- paste0(
@@ -249,7 +342,7 @@ get_blocks <- function() {
       "ID_BLOCK_CODE" : 1,
       "PRIORITY" : 1,
       "ID_EBD_NAME" : 1,
-      "ECOREGION" : 1,
+      "ECOREGION" : 1
     }'
   )
 
@@ -258,33 +351,46 @@ get_blocks <- function() {
   return(results)
 }
 
-# block_data <- get_blocks()
-# county_ecoregion <- blocks %>%
+block_data <- get_blocks()
+county_ecoregion <- block_data %>%
+  distinct(COUNTY, ECOREGION) %>%
+  filter(COUNTY != "") %>%
+  mutate(COUNTY_TITLE = str_to_title(COUNTY))
 
 
-# get_ecoregion <- function(county) {
-#   return()
-# }
+add_ecoregion_to_df <- function(df) {
+
+  if ("COUNTY" %in% names(df)) {
+    df$ECOREGION <-
+      county_ecoregion$ECOREGION[match(
+        df$COUNTY, county_ecoregion$COUNTY_TITLE
+      )]
+  }
+  return(df)
+}
+
+add_species_codes_to_df <- function(df, species) {
+  selected_species_codes <- species_codes[
+    species_codes$SPECIES == species,
+  ]
+  if (
+    "ECOREGION" %in% names(df) &&
+    "BREEDING_CODE" %in% names(df)
+    ) {
+      df <- df %>%
+        merge(
+          selected_species_codes,
+          by = c("BREEDING_CODE", "ECOREGION")
+        )
+    }
+
+  return (df)
+}
 
 ## BBA REVEIW REASONS
 
 bba_review_reasons <- read.csv("bba_review_reasons.csv")
+bba_review_reason_list <- c("", bba_review_reasons$reason)
 
 
-## BREEDING CODE LISTS
-breeding_codes <- read.csv("breeding_codes.csv")
-breeding_codes <- breeding_codes %>%
-  mutate(
-    select_label = paste0(description, " (", code, ")")
-  )
-
-breeding_category_names <- unique(breeding_codes$category_name)
-
-breeding_code_select_list <- split(
-  breeding_codes$code,
-  breeding_category_names
-)
-get_breeding_category <- function(code) {
-  result <- breeding_codes[breeding_codes$code == code,]$category
-  result
-}
+species_codes <- read.csv("ncba_species_codes.csv")

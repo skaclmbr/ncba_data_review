@@ -72,7 +72,7 @@ aggregate_ebd_data <- function(pipeline) {
 
 # specificy breeding codes and preferred plotting order
 # this vector will need updating if any new codes are introduced via "lump".
-codelevels <- factor(c(
+code_levels_list <- factor(c(
   "Obs",
   "NC",
   "O",
@@ -204,7 +204,7 @@ retrieve_observations <- function(species) {
       mutate(
         ebird_link = paste0("https://ebird.org/checklist/", sei),
         breeding_code = factor(
-          obs_records$breeding_code, levels = codelevels, ordered = TRUE
+          obs_records$breeding_code, levels = code_levels_list, ordered = TRUE
         )
       )
     }

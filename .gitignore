@@ -2,7 +2,7 @@ ncba_config.r
 test.r
 test2.r
 test_breeding_codes.r
-# utils_test.r
+utils_test.r
 users.csv
 
 .Rproj.user

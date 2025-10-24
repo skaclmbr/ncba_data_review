@@ -18,8 +18,8 @@ dec_places <- function(num, digits = 2, ...) {
 # this is a read only account
 HOST = "cluster0-shard-00-00.rzpx8.mongodb.net:27017"
 DB = "ebd_mgmt"
-COLLECTION = "ebd_test" # testing
-# COLLECTION = "ebd" # production
+# COLLECTION = "ebd_test" # testing
+COLLECTION = "ebd" # production
 source("ncba_config.r")
 # other relevant collections include: blocks and ebd_taxonomy
 
@@ -88,6 +88,7 @@ species_list <- sort(
     filter = '{"PRIMARY_COM_NAME":1}'
   )$PRIMARY_COM_NAME, decreasing = FALSE
 )
+species_list <- c("", species_list) # add blank for select list
 
 #############################################################################
 # Breeding Categories and Colors
@@ -98,22 +99,34 @@ breeding_codes <- read.csv("breeding_codes.csv")
 #   mutate(
 #     select_label = paste0(description, " (", code, ")")
 #   )
-codelevels <- factor(
+code_levels_list <- factor(
   c(
-    "", "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
+    "", "No Change", "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
     "PE", "CN", "NB", "DD", "UN", "ON", "FL", "CF", "FY", "FS", "NE", "NY"
   )
 )
+code_levels_boxplot <- c(
+    "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
+    "PE", "CN", "NB", "DD", "UN", "ON", "FL", "CF", "FY", "FS", "NE", "NY"
+  )
 
-breeding_category_names <- unique(breeding_codes$category_name)
+# breeding_category_names <- unique(breeding_codes$category_name)
 
 get_breeding_category <- function(code) {
   result <- breeding_codes[breeding_codes$code == code,]$category
   return(result)
 }
 
-breeding_categories <- breeding_category_names
+# breeding_categories <- breeding_category_names
+# used to develop palette - for the map
+breeding_categories <- c(
+  "Confirmed",
+  "Probable",
+  "Possible",
+  "Observed"
+)
 
+# used in boxplot
 categorycolors <- c(
   "Observed" = "#f2f0f7",
   "Possible" = "#cbc9e2",
@@ -121,27 +134,38 @@ categorycolors <- c(
   "Confirmed" = "#6a51a3"
 )
 
-get_category <- function(BREEDING_CODE) {
-  return(
-    breeding_codes[breeding_codes$code == BREEDING_CODE,]$category_name
-  )
-}
+# get_category <- function(BREEDING_CODE) {
+#   return(
+#     breeding_codes[breeding_codes$code == BREEDING_CODE,]$category_name
+#   )
+# }
 
-get_category_color <- function(BREEDING_CODE) {
-  return(categorycolors[get_category(BREEDING_CODE)])
-} 
+# get_category_color <- function(BREEDING_CODE) {
+#   return(categorycolors[get_category(BREEDING_CODE)])
+# } 
 
 
 #############################################################################
 # Review Record Management
 
-update_review_record <- function(GUID, update_code) {
+update_review_record <- function(guids, update_code) {
   print("update_review_record runs!")
+  # filter <- paste0(
+  #   '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', guid, '"}'
+  # )
+  # compile filter list
+  guid_list <- '['
+  for (o in guids) {
+    guid_list <- paste0(guid_list, '"', o, '",')
+  }
+  guid_list <- substr(guid_list, 1, nchar(guid_list) - 1)
+  guid_list <- paste0(guid_list, "]")
   filter <- paste0(
-    '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}'
+    '{"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {"$in" :', guids, '}}'
   )
-  
-  array_filter <- paste0('[{"elem.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}]')
+
+  array_filter <- paste0(
+    '[{"elem.GLOBAL_UNIQUE_IDENTIFIER" : {"$in" : ', guids, '}}]')
 
   result <- m$update(
     query = filter,
@@ -195,6 +219,7 @@ get_observations <- function(species) {
         "LOCALITY" : 1,
         "OBSERVATION_DATE" : 1,
         "COUNTY" : 1,
+        "NCBA_REVIEW" : 1,
         "_id" : 0
       }
     }
@@ -247,44 +272,45 @@ default_obs_project <- paste0('{
     "LOCALITY" : 1,
     "LATITUDE": 1,
     "LONGITUDE" : 1,
+    "NCBA_REVIEW" : 1,
     "_id" : 0
   }'
 )
 
-get_obs_record <- function(GUID, project = default_obs_project) {
-  # Retrieve observation data record
-  #
-  # Description:
-  #   Returns records resulting from the passed aggregation pipeline
-  #
-  # Arguments:
-  # GUID -- valid GLOBAL_UNIQUE_IDENTIFIER
-  # project -- valid JSON of fields to be returned
+# get_obs_record <- function(GUID, project = default_obs_project) {
+#   # Retrieve observation data record
+#   #
+#   # Description:
+#   #   Returns records resulting from the passed aggregation pipeline
+#   #
+#   # Arguments:
+#   # GUID -- valid GLOBAL_UNIQUE_IDENTIFIER
+#   # project -- valid JSON of fields to be returned
 
-  pipeline <- paste0(
-    '[
-      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
-      {"$unwind" : {"path" : "$OBSERVATIONS"}},
-      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
-      {"$project": ', project, '}
-    ]'
-  )
-  results <- aggregate_ebd_data(pipeline)
+#   pipeline <- paste0(
+#     '[
+#       {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
+#       {"$unwind" : {"path" : "$OBSERVATIONS"}},
+#       {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : "', GUID, '"}},
+#       {"$project": ', project, '}
+#     ]'
+#   )
+#   results <- aggregate_ebd_data(pipeline)
 
-  # add ecoregion if county present
-  results <- add_ecoregion_to_df(results)
+#   # add ecoregion if county present
+#   results <- add_ecoregion_to_df(results)
 
-  # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
-  results <- results %>%
-    mutate(
-      EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
-    )
-  # add species code review data
-  results <- add_species_codes_to_df(results, species)
+#   # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
+#   results <- results %>%
+#     mutate(
+#       EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
+#     )
+#   # add species code review data
+#   results <- add_species_codes_to_df(results, species)
 
-  return(results[1,])
+#   return(results[1,])
 
-}
+# }
 get_obs_records <- function(guids, species, project = default_obs_project) {
   # Retrieve observation data record
   #
@@ -326,6 +352,22 @@ get_obs_records <- function(guids, species, project = default_obs_project) {
     )
   # add species code review data
   results <- add_species_codes_to_df(results, species)
+  
+  ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  # add REVIEW_STATUS field
+  # R = reviewed (NCBA_REVIEW present)
+  # U = unreviewed (NCBA_REVIEW not present)
+
+  # add FLAG field - used to format table, map, boxplot points
+  # all combos of the following:
+  # outside safe dates
+  # outside breeding range
+  # flagged spp/code combo
+  # unsuitable spp/code combo
+
+  # REVIEW_STATUS = R should trump any other formatting
+
+  ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   return(results)
 
@@ -394,3 +436,4 @@ bba_review_reason_list <- c("", bba_review_reasons$reason)
 
 
 species_codes <- read.csv("ncba_species_codes.csv")
+

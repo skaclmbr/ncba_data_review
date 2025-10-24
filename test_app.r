@@ -2,9 +2,69 @@ library("DT")
 library("htmltools")
 library("mongolite")
 library("dplyr")
+library("ggiraph")
+library("ggplot2")
+if(!require(ggridges)) install.packages(
+  "ggridges", repos = "http://cran.us.r-project.org")
 source("utils.r")
 spp_name <- "Acadian Flycatcher"
 acfl <- get_observations(spp_name)
+
+
+
+od <- acfl
+
+gg_point <- ggplot(
+  data = od,
+  aes(
+    x = JULIAN_DAY,
+    y = BREEDING_CODE,
+  )
+) +
+  geom_vline_interactive(
+    xintercept = 100,
+    # x_intercept = form_data$species_safe_date_start_jd,
+    linetype = "dashed",
+    color = "red",
+    # size = 1,
+    # aes(tooltip = "Safe Dates")
+  ) +
+  labs(y = "Breeding Code", x = "Julian Day") +
+  geom_boxplot(
+    aes(
+      x = JULIAN_DAY,
+      y = BREEDING_CODE,
+      fill = BREEDING_CATEGORY
+    ),
+    show.legend = FALSE
+  ) +
+  scale_fill_manual(values = categorycolors) +
+  geom_point_interactive(
+    aes(
+      x = JULIAN_DAY,
+      y = BREEDING_CODE,
+      tooltip = SEI,
+      data_id = GUID,
+      onclick = paste0(
+        'Shiny.onInputChange("obs_clicked","', GUID, '")'
+      ),
+    ),
+    show.legend = FALSE,
+    position = position_jitter(
+      width = 0.3,
+      height = 0.3
+    )
+  ) +
+  xlim(0, 365) +
+  theme_minimal()
+
+girafe(
+  ggobj = gg_point,
+  width_svg = 10,
+  options = list(opts_sizing(rescale = TRUE))
+)
+
+
 
 data(mtcars)
 

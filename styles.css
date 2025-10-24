@@ -28,7 +28,47 @@ h5 {
     font-size: 0.8rem;
     font-style: italic;
 }
+.smaller-text {
+    font-size: 0.8rem;
+}
 
 .red-text {
     color: red;
+}
+
+.records-to-change-list {
+    font-size: 0.8rem;
+    color: #dddddd;
+    font-style: italic;
+}
+
+.tooltip {
+  position: relative;
+  display: inline-block;
+  border-bottom: 1px dotted black;
+  cursor: pointer;
+}
+
+.tooltiptext {
+  visibility: hidden;
+  width: 130px;
+  background-color: black;
+  color: #fff;
+  text-align: center;
+  border-radius: 6px;
+  padding: 5px 0;
+  position: absolute;
+  z-index: 1;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+}
+
+.seletize-input {
+    padding: 4px;
+}
+
+#select_flagged, #select_safe_dates, #select_region {
+    display: inline-block;
 }

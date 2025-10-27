@@ -398,7 +398,7 @@ county_ecoregion <- block_data %>%
   distinct(COUNTY, ECOREGION) %>%
   filter(COUNTY != "") %>%
   mutate(COUNTY_TITLE = str_to_title(COUNTY))
-
+block_list <- list("")
 
 add_ecoregion_to_df <- function(df) {
 

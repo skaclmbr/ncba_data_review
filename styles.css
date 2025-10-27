@@ -72,3 +72,7 @@ h5 {
 #select_flagged, #select_safe_dates, #select_region {
     display: inline-block;
 }
+
+#obs-detail {
+    padding-bottom: 10px;
+}

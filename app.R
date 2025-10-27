@@ -95,41 +95,53 @@ ui <- fluidPage(
         ),
         uiOutput("spp_status"),
         checkboxInput(
+          "check_suitable",
+          "Suitable Spp/Code",
+          value = TRUE
+        ),
+        checkboxInput(
           "check_flagged",
           "Flagged Spp/Code",
           value = TRUE
         ),
         checkboxInput(
-          "check_safe_dates",
-          "Outside Safe Dates",
+          "check_unsuitable",
+          "Unsuitable Spp/Code",
           value = TRUE
         ),
         checkboxInput(
-          "check_region",
-          "Outside Region",
-          value = TRUE
+          "check_safe_dates",
+          "Outside Safe Dates Only",
+          value = FALSE
         ),
+        # checkboxInput(
+        #   "check_region",
+        #   "Outside Region Only",
+        #   value = TRUE
+        # ),
         checkboxInput(
           "check_unreviewed",
           "Unreviewed Only",
-          value = TRUE
+          value = FALSE
         ),
-        selectizeInput(
-          "select_block",
-          h4("Select Block"),
-          choices = block_list, options = list(
-            placeholder = "Select block",
-            onInitialize = I('function() {this.setValue(""); }')
-          )
-        ),
-        selectizeInput(
-          "select_code",
-          h4("Select Breeding Code"),
-          choices = block_list, options = list(
-            placeholder = "Select block",
-            onInitialize = I('function() {this.setValue(""); }')
-          )
-        ),
+        # selectizeInput(
+        #   "select_block",
+        #   h4("Select Block"),
+        #   choices = block_list, options = list(
+        #     placeholder = "Select block",
+        #     onInitialize = I('function() {this.setValue(""); }')
+        #   )
+        # ),
+        # selectizeInput(
+        #   "select_code",
+        #   h4("Select Breeding Code"),
+        #   choices = code_levels_list, options = list(
+        #     placeholder = "Select breeding code",
+        #     onInitialize = I('function() {this.setValue(""); }')
+        #   ),
+        #   multiple = TRUE
+        # ),
+        uiOutput("records_found"),
       ),
       card(
         card_header("Observation Detail"),
@@ -219,7 +231,7 @@ server <- function(input, output, session) {
         review_card_text <- paste("Review Status -", user_info$name)
 
         ## enable update button
-        # shinyjs::enable("update_record")
+        # shinyjs::enable("update_record") #commented out for testing
 
       } else {
         ## remove labels
@@ -234,46 +246,24 @@ server <- function(input, output, session) {
     }
   )
 
-  # listen for changes to input criteria
-  observeEvent(
-    c(
-      input$check_flagged,
-      input$check_safe_dates,
-      input$check_region,
-      input$check_unreviewed,
-      input$select_block,
-      input$select_code
-    ),
-
-  
-  )
-
   # store current info
+  # background storage for record info to reduce requerying database
   form_data <- reactiveValues(
     species_status = NULL, #breeding, etc...
     species_safe_date_start_jd = NULL, #start safe date as julian day
     species_safe_date_end_jd = NULL, #end safe date as julian day
     all_obs_data = NULL, # df of all obs data for selected species
-    selected_obs = NULL, # df of selected observation records - in table
-    selected_obs_ids = NULL, # list of selected observation ids - in table
-
-    # highlight_ids = NULL # list of highlighted records to apply review results
-    # obs_record = NULL, # selected observation record (one row df)
-    # checklist = NULL, # selected checklist
-    # checklist_url = NULL, # selected checklist eBird URL
-    # observation = NULL, # selected observation GUID
+    all_obs_num = 0,
+    filtered_obs = NULL, # obs filtered from checkboxes
+    selected_obs = NULL # observations displayed in table (selected from map/boxplot)
   )
 
   #######################################################################
   ## FUNCTIONS
 
   clear_all_obs_data <- function() {
+    clear_selected_obs()
     form_data$all_obs_data <- NULL
-    form_data$selected_obs <- NULL
-    form_data$selected_obs_ids <- NULL
-
-    # clear table
-    output$selected_obs_table <- NULL
 
     # clear map
     leafletProxy("obs_map", session) %>%
@@ -283,11 +273,17 @@ server <- function(input, output, session) {
     output$boxplot <- NULL
   }
 
+  clear_filtered_obs <- function() {
+    clear_selected_obs()
+    form_data$filtered_obs <- NULL
+  }
+
   clear_selected_obs <- function() {
-    # clear records in the table
+    # clear records in form_data for the table
     form_data$selected_obs <- NULL
-    form_data$selected_obs_ids <- NULL
-    # form_data$highlight_ids <- NULL
+
+    # clear table
+    output$selected_obs_table <- NULL
 
     # clear highlighted points in boxplot
     # updateGirafe(session, "boxplot", selected = character(0))
@@ -296,21 +292,49 @@ server <- function(input, output, session) {
       message = character(0)
     )
 
-    # clear table
-    output$selected_obs_table <- NULL
+    # clear map
+    leafletProxy("obs_map", session) %>%
+      clearGroup("selected")
 
-    # clear map
-    leafletProxy("obs_map", session) %>%
-      clearGroup("selected") %>%
-      clearGroup("highlighted")
+    # clear observation detail
+    clear_obs_detail()
+
   }
-  clear_highlight_list <- function() {
-    # clear highlighted records in the table
-    # form_data$highlight_ids <- NULL
-    # clear map
-    leafletProxy("obs_map", session) %>%
-      clearGroup("highlighted")
+
+  clear_obs_detail <- function() {
+    output$observation_detail <- renderUI(HTML(""))
   }
+  
+  apply_filters <- function(){
+    req(form_data$all_obs_data)
+
+    # filter all_obs_data to filter criteria
+    clear_filtered_obs()
+    
+    # selected_codes <- c("F")
+
+    form_data$filtered_obs <- form_data$all_obs_data %>%
+      filter(
+        CHECK_FLAGGED == input$check_flagged |
+        CHECK_SUITABLE == input$check_suitable |
+        CHECK_UNSUITABLE == input$check_unsuitable
+      ) %>%
+      filter(
+        ifelse(
+          input$check_safe_dates,
+          CHECK_SAFE_DATES == TRUE,
+          CHECK_SAFE_DATES %in% c(TRUE, FALSE)
+        ),
+        ifelse(
+          input$check_unreviewed,
+          CHECK_UNREVIEWED == TRUE,
+          CHECK_UNREVIEWED %in% c(TRUE, FALSE)
+        )
+      )
+
+    print(paste(nrow(form_data$filtered_obs), "filtered records"))
+  }
+
 
   #######################################################################
   ## OBS MAP SETUP
@@ -337,203 +361,191 @@ server <- function(input, output, session) {
   #######################################################################
   ## LISTENERS
   ## listen for click on boxplot point, render table
-  # change form_data
-  # observeEvent(
-  #   input$obs_clicked,
-  #   {form_data$observation <- input$obs_clicked}
-  # )
-  # ## listen for click on map
-  # observeEvent(
-  #   input$obs_map_marker_click,
-  #   {
-  #     form_data$observation <- input$obs_map_marker_click$id
-  #   }
-  # )
 
-  # # Display
-  # # * highlight flagged observations in map and boxplot: 
-  # #   * F or U species-code combos,
-  # #   * outside safe dates,
-  # #   * outside breedingrange
-  # # * highlight blocks with history of breeding
-  # # Process
-  # # * highlight observations from either boxplot or map
-  # #   * obs show in the observations list
-  # # * select obs to change - will show in review results list
-  # # * complete form, update button
-  # # * display reviewed records in the boxplot/map
+  # listen for changes to input criteria - filter
+  observeEvent(
+    c(
+      input$check_suitable,
+      input$check_unsuitable,
+      input$check_flagged,
+      input$check_safe_dates,
+      # input$check_region,
+      input$check_unreviewed,
+      input$select_block,
+      input$select_code
+    ),
+    {
+      print("CHECKBOXES CHANGED")
+      apply_filters()
+    }
+  )
 
-  # check species NC Status
-  # observeEvent(
-  #   form_data$species_status,
-  #   input$spp_status <- renderUI({
-  #     if (is.null(form_data$species_status)) {
-  #       HTML("")
-  #     } else {
-  #       HTML(paste0(
-  #         '<span class="diminish-text">',
-  #         form_data$species_status,
-  #         '</span>'
-  #         )
-  #       )
-  #     }     
-  #   })
-  # )
 
+  ## SPECIES SELECTION
   # listen for changes to spp_select
   observeEvent(
     input$spp_select,
     {
       req(credentials()$user_auth) # for production
       req(input$spp_select)
-      form_data$observation <- NULL
+      clear_all_obs_data()
 
       ## No Selection
       if (is.null(input$spp_select) | input$spp_select == "") {
-        clear_all_obs_data()
+
         block_list <- c("")
 
       } else {
 
         # species is selected, see if there is data
-        form_data$all_obs_data <- get_observations(input$spp_select)
-
-        # populate safe dates in form data
-        spp_sd_record <- species_codes[
-          species_codes$SPECIES == input$spp_select,
-        ]
-        spp_sd_record <- spp_sd_record[1,]
-
-        form_data$species_safe_date_start_jd <-
-          spp_sd_record$SAFE_DATE_START_JD
-        form_data$species_safe_date_end_jd <-
-          spp_sd_record$SAFE_DATE_END_JD
-
-        # form_data$species_status <-
-        #   spp_sd_record$NC_STATUS
-
-        # populate block list
-        block_list <- unique(spp_sd_record[, "ID_NCBA_BLOCK"])
-        block_list <- c("", block_list)
-
+        # GET ALL DATA INFO
+        all_data <- get_observations(input$spp_select)
 
         # plot data
-        if (nrow(form_data$all_obs_data) > 0) {
-          od <- form_data$all_obs_data
-          od$BREEDING_CODE <- factor(
-            od$BREEDING_CODE,
-            levels = code_levels_boxplot
+        if (all_data$success) {
+          # populate safe dates in form data
+          # use to plot vertical lines on plot
+          form_data$all_obs_data <- all_data$records
+          form_data$species_safe_date_start_jd <-
+            all_data$sd_start_julian
+          form_data$species_safe_date_end_jd <-
+            all_data$sd_end_julian
+
+          form_data$species_status <- all_data$status
+
+          form_data$all_obs_num <- nrow(form_data$all_obs_data)
+
+          output$spp_status <- renderUI(HTML(
+            form_data$species_status
+          ))
+
+          print("species selected - about to apply filters")
+          print(head(form_data$all_obs_data$SEI))
+          apply_filters()
+          print("species selected - filters applied")
+          print(head(form_data$filtered_obs$SEI))
+
+          # populate block list where spp has been coded
+          block_list <- order(
+            unique(form_data$filtered_obs[, "ID_NCBA_BLOCK"])
           )
-
-          ###############################
-          ## Add observations to the boxplot
-          output$boxplot <- renderGirafe(
-            {
-
-
-              # od <- form_data$all_obs_data
-
-              gg_point <- ggplot(
-                data = od,
-                aes(
-                  x = JULIAN_DAY,
-                  y = BREEDING_CODE,
-                )
-              ) +
-                geom_vline(
-                  xintercept = c(
-                    form_data$species_safe_date_start_jd,
-                    form_data$species_safe_date_end_jd
-                  ),
-                  linetype = "dashed",
-                  color = "gray",
-                  size = 1,
-                  aes(tooltip = "Safe Dates")
-                ) +
-                labs(y = "Breeding Code", x = "Julian Day") +
-                geom_boxplot(
-                  aes(
-                    x = JULIAN_DAY,
-                    y = BREEDING_CODE,
-                    fill = BREEDING_CATEGORY
-                  ),
-                  show.legend = FALSE
-                ) +
-                scale_fill_manual(values = categorycolors) +
-                geom_point_interactive(
-                  aes(
-                    x = JULIAN_DAY,
-                    y = BREEDING_CODE,
-                    tooltip = SEI,
-                    data_id = GUID,
-                    onclick = paste0(
-                      'Shiny.onInputChange("obs_clicked","', GUID, '")'
-                    ),
-                  ),
-                  show.legend = FALSE,
-                  position = position_jitter(
-                    width = 0.3,
-                    height = 0.3
-                  )
-                ) +
-                xlim(0, 365) +
-                theme_minimal()
-
-              girafe(
-                ggobj = gg_point,
-                width_svg = 10,
-                options = list(opts_sizing(rescale = TRUE))
-              )
-
-            }
+          block_list <- c("All Blocks", block_list)
+    
+          # update block list select
+          updateSelectizeInput(
+              session = session,
+              inputId = "select_block",
+              choices = block_list,
+              selected = ""
           )
-
-          ###############################
-          ## Add observations to the map
-          # add circles to map
-          leafletProxy("obs_map", session) %>%
-            clearMarkers() %>%
-            addCircleMarkers(
-              data = od,
-              layerId = ~ od$GUID,
-              lat = ~ LATITUDE,
-              lng = ~ LONGITUDE,
-              radius = 5,
-              opacity = 1,
-              stroke = TRUE,
-              color = ncba_blue,
-              weight = 0.9,
-              # fillColor = ncba_blue,
-              fillColor = ~ breeding_category_pal(od$BREEDING_CATEGORY),
-              fillOpacity = 1,
-              group = "SpeciesObservations",
-              label = sprintf(
-                "<strong>%s</strong><br/>%s<br/>%s<br/>%s",
-                od$SEI,
-                od$OBSERVATION_DATE,
-                od$BREEDING_CATEGORY,
-                od$BREEDING_CODE
-              ) %>%
-              lapply(htmltools::HTML)
-            )
-        } else {
-          # no records found
-          form_data$all_obs_data <- NULL
-          block_list <- c("")
-          # clear map
-          leafletProxy("obs_map", session) %>%
-            clearMarkers()
 
         }
       }
+    }
+  )
+
+  ###############################
+  ## Add filtered observations to the boxplot and the map
+  observeEvent(
+    form_data$filtered_obs,
+    {
+      req(form_data$filtered_obs)
+      od <- form_data$filtered_obs
+      print("FILTERED OBS CHANGED")
       
-      # update block list select
-      updateSelectizeInput(
-          session = session,
-          inputId = "select_block",
-          choices = block_list,
-          selected = ""
-      )
+      num_filtered_obs <- nrow(od)
+      output$records_found <- renderUI(
+        HTML(paste( num_filtered_obs, "of" , form_data$all_obs_num, "found"))
+       )
+      if (nrow(od) > 0) {
+        output$boxplot <- renderGirafe(
+          {
+            gg_point <- ggplot(
+              data = od,
+              aes(
+                x = JULIAN_DAY,
+                y = BREEDING_CODE,
+              )
+            ) +
+              geom_vline(
+                xintercept = c(
+                  form_data$species_safe_date_start_jd,
+                  form_data$species_safe_date_end_jd
+                ),
+                linetype = "dashed",
+                color = "gray",
+                size = 1,
+                aes(tooltip = "Safe Dates")
+              ) +
+              labs(y = "Breeding Code", x = "Julian Day") +
+              geom_boxplot(
+                aes(
+                  x = JULIAN_DAY,
+                  y = BREEDING_CODE,
+                  fill = BREEDING_CATEGORY
+                ),
+                show.legend = FALSE
+              ) +
+              scale_fill_manual(values = categorycolors) +
+              geom_point_interactive(
+                aes(
+                  x = JULIAN_DAY,
+                  y = BREEDING_CODE,
+                  tooltip = SEI,
+                  data_id = GUID,
+                  onclick = paste0(
+                    'Shiny.onInputChange("obs_clicked","', GUID, '")'
+                  ),
+                ),
+                show.legend = FALSE,
+                position = position_jitter(
+                  width = 0.3,
+                  height = 0.3
+                )
+              ) +
+              xlim(0, 365) +
+              theme_minimal()
+
+            girafe(
+              ggobj = gg_point,
+              width_svg = 10,
+              options = list(opts_sizing(rescale = TRUE))
+            )
+          }
+        )
+
+
+      ###############################
+      ## Add observations to the map
+      # add circles to map
+      leafletProxy("obs_map", session) %>%
+        clearMarkers() %>%
+        addCircleMarkers(
+          data = od,
+          layerId = ~ od$GUID,
+          lat = ~ LATITUDE,
+          lng = ~ LONGITUDE,
+          radius = 5,
+          opacity = 1,
+          stroke = TRUE,
+          color = ncba_blue,
+          weight = 0.9,
+          # fillColor = ncba_blue,
+          fillColor = ~ breeding_category_pal(od$BREEDING_CATEGORY),
+          fillOpacity = 1,
+          group = "SpeciesObservations",
+          label = sprintf(
+            "<strong>%s</strong><br/>%s<br/>%s<br/>%s",
+            od$SEI,
+            od$OBSERVATION_DATE,
+            od$BREEDING_CATEGORY,
+            od$BREEDING_CODE
+          ) %>%
+          lapply(htmltools::HTML)
+        )
+      } else {
+        clear_filtered_obs()
+      }
     }
   )
 
@@ -543,13 +555,13 @@ server <- function(input, output, session) {
   observeEvent(
     input$boxplot_selected,
     {
-      # print("boxplot_selected change event")
-      # print(input$boxplot_selected)
-
       if (is.null(input$boxplot_selected)) {
         clear_selected_obs()
       } else{
-        form_data$selected_obs_ids <- input$boxplot_selected
+        selected_obs_ids <- input$boxplot_selected
+
+        form_data$selected_obs <- form_data$filtered_obs %>%
+          filter(GUID %in% selected_obs_ids)
       }
     }
   )
@@ -558,23 +570,19 @@ server <- function(input, output, session) {
   ## ADD Map highlighting function
 
   observeEvent(
-    form_data$selected_obs_ids,
+    form_data$selected_obs,
     {
+      num_selected_obs <- nrow(form_data$selected_obs)
       # runs when selected obs is changed
-      if (length(form_data$selected_obs_ids) == 0) {
+      if (num_selected_obs == 0) {
 
-        form_data$selected_obs <- NULL
-
-        output$selected_obs_table <- NULL
+        clear_selected_obs()
 
       } else {
-        # get obs record info
-        form_data$selected_obs <- get_obs_records(
-          form_data$selected_obs_ids,
-          input$spp_select
+        output$obs_list_header <- renderUI(
+          HTML(paste("Selected Observations -", num_selected_obs, "found"))
         )
-
-        # populate observations list
+        # populate observations list table
         selected_obs_list <- form_data$selected_obs %>%
           mutate(
             BREEDING_CODE_CATEGORY = paste0(
@@ -675,7 +683,8 @@ server <- function(input, output, session) {
 
         }) # end of output code for table
 
-        ## map points in table
+        ##############################################################
+        ## Highlight map points in table
         # Get the bounding box of the points
         min_lat <- min(selected_obs_list$LATITUDE)
         max_lat <- max(selected_obs_list$LATITUDE)
@@ -707,12 +716,6 @@ server <- function(input, output, session) {
     {clear_selected_obs()}
   )
 
-  observeEvent(
-    input$clear_highlight_list,
-    {clear_highlight_list()}
-  )
-
-
   #########################################################################
   ## Display selected Observation Details
   # listen for form_data changes
@@ -729,18 +732,6 @@ server <- function(input, output, session) {
         highlight_row <- input$selected_obs_table_rows_selected
 
         obs_record <- form_data$selected_obs[highlight_row, ]
-        # print(obs_record)
-
-        # update review results card
-        # output$review_record_id <- renderUI(
-        #   {
-        #     record_id <- paste0(
-        #       '<a href="', form_data$checklist_url, '" target = "_blank">', 
-        #       form_data$checklist, ' (', form_data$observation, ')</a>'
-        #     )
-        #     HTML(record_id)
-        #   }
-        # )
 
         # update observation data
         output$observation_data <- renderUI(
@@ -777,66 +768,13 @@ server <- function(input, output, session) {
     }
   )
 
-  #       # zoom map to obs
-  #       latitude <- obs_record[1, "LATITUDE"]
-  #       longitude <- obs_record[1, "LONGITUDE"]
-  #       leafletProxy("obs_map", session) %>%
-  #         setView(
-  #           lat = latitude,
-  #           lng = longitude,
-  #           zoom = nc_obs_zoom
-  #         ) %>%
-  #         clearGroup("highlight") %>%
-  #         addCircleMarkers(
-  #           lat = latitude,
-  #           lng = longitude,
-  #           stroke = TRUE,
-  #           color = "red",
-  #           weight = 6,
-  #           radius = 10,
-  #           opacity = 1,
-  #           group = "highlight"
-  #         )
-  #     }
-  #   },
-  #   ignoreNULL = FALSE
-  # )
   
   #########################################################################
   ## Record Update actions
 
   ## RECORDS TO CHANGE LIST
   # include hyperlinks to checklists, hover text for details
-  # observeEvent(
-  #   input$selected_obs_table_rows_selected,
-  #   {
-  #     highlight_rows <- input$selected_obs_table_rows_selected
 
-  #     if (is.null(highlight_rows)) {
-  #       output$num_selected <- renderUI(
-  #         HTML("0 selected")
-  #       )
-
-  #     } else {
-
-  #       output$num_selected <- renderUI(
-  #         HTML(paste(
-  #           length(highlight_rows),
-  #           "selected"
-  #           )
-  #         )
-  #       )
-
-  #       # populate highlight ids
-
-  #       # print(form_data$selected_obs_ids[highlight_rows])
-
-  #       form_data$highlight_ids <-
-  #         form_data$selected_obs_ids[highlight_rows]
-
-  #     }
-  #   }
-  # )
   # add code here to vet record before uploading to mongodb
 
   observeEvent(

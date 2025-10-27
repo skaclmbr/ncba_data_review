@@ -18,8 +18,8 @@ dec_places <- function(num, digits = 2, ...) {
 # this is a read only account
 HOST = "cluster0-shard-00-00.rzpx8.mongodb.net:27017"
 DB = "ebd_mgmt"
-# COLLECTION = "ebd_test" # testing
-COLLECTION = "ebd" # production
+COLLECTION = "ebd_test" # testing
+# COLLECTION = "ebd" # production
 source("ncba_config.r")
 # other relevant collections include: blocks and ebd_taxonomy
 
@@ -72,23 +72,6 @@ user_list <- function() {
   return(result)
 }
 user_base <- user_list()
-
-#############################################################################
-# Get Species List
-get_spp_list <- function(query = "{}", filter = "{}" ) {
-
-  mongodata <- m_spp$find(query, filter)
-
-  return(mongodata)
-}
-
-species_list <- sort(
-  get_spp_list(
-    query = '{"NC_STATUS":"definitive"}',
-    filter = '{"PRIMARY_COM_NAME":1}'
-  )$PRIMARY_COM_NAME, decreasing = FALSE
-)
-species_list <- c("", species_list) # add blank for select list
 
 #############################################################################
 # Breeding Categories and Colors
@@ -179,6 +162,46 @@ update_review_record <- function(guids, update_code) {
 
 #############################################################################
 # Observations
+default_obs_project <- paste0('{
+    "SEI" : "$SAMPLING_EVENT_IDENTIFIER",
+    "GUID" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
+    "OBSERVATION_DATE" : 1,
+    "JULIAN_DAY" : "$NCBA_JULIAN_DAY",
+    "TIME_OBSERVATIONS_STARTED" : 1,
+    "COUNTY" : 1,
+    "ID_NCBA_BLOCK" : 1,
+    "OBSERVER_ID" : 1,
+    "NCBA_OBSERVER" : 1,
+    "PROTOCOL_TYPE" : 1,
+    "DURATION_MINUTES" : 1,
+    "EFFORT_DISTANCE_KM" : 1,
+    "NUMBER_OBSERVERS" : 1,
+    "COMMON_NAME" : "$OBSERVATIONS.COMMON_NAME",
+    "SCIENTFIC_NAME" : "$OBSERVATIONS.SCIENTIFIC_NAME",
+    "BREEDING_CODE" : "$OBSERVATIONS.BREEDING_CODE",
+    "BREEDING_CATEGORY" : "$OBSERVATIONS.BREEDING_CATEGORY",
+    "BEHAVIOR_CODE" : "$OBSERVATIONS.BEHAVIOR_CODE",
+    "SPECIES_COMMENTS" : "$OBSERVATIONS.SPECIES_COMMENTS",
+    "HAS_MEDIA" : "$OBSERVATIONS.HAS_MEDIA",
+    "LOCALITY" : 1,
+    "LATITUDE": 1,
+    "LONGITUDE" : 1,
+    "NCBA_REVIEWED" : {
+      "$cond" : [
+        {"$ne" : ["$NCBA_REVIEW", null]},
+        true,
+        false
+      ]
+    }, 
+    "NCBA_REVIEW_REVIEWER" : "$OBSERVATIONS.NCBA_REVIEW.REVIEWER",
+    "NCBA_REVIEW_DATE_TIME" : "$OBSERVATIONS.NCBA_REVIEW.REVIEW_DATE_TIME",
+    "NCBA_REVIEW_BREEDING_CODE" : "$OBSERVATIONS.NCBA_REVIEW.BREEDING_CODE",
+    "NCBA_REVIEW_BREEDING_CATEGORY" : "$OBSERVATIONS.NCBA_REVIEW.BREEDING_CATEGORY",
+    "NCBA_REVIEW_BBA_REASON" : "$OBSERVATIONS.NCBA_REVIEW.BBA_REASON",
+    "NCBA_REVIEW_NOTES" : "$OBSERVATIONS.NCBA_REVIEW.NOTES",
+    "_id" : 0
+  }'
+)
 
 get_observations <- function(species) {
   # Perform aggregation on ebd collection in MongoDB Atlas implementation
@@ -209,73 +232,90 @@ get_observations <- function(species) {
       }
     },
     {
-      "$project" : {
-        "JULIAN_DAY" : "$NCBA_JULIAN_DAY",
-        "BREEDING_CODE" : "$OBSERVATIONS.BREEDING_CODE",
-        "SEI" : "$_id",
-        "GUID" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
-        "LATITUDE" : 1,
-        "LONGITUDE" : 1,
-        "LOCALITY" : 1,
-        "OBSERVATION_DATE" : 1,
-        "COUNTY" : 1,
-        "NCBA_REVIEW" : 1,
-        "_id" : 0
-      }
+      "$project" : ', default_obs_project, '
     }
   ]')
 
-  results <- aggregate_ebd_data(pipeline)
-  if (nrow(results) > 0) {
-    # ADD BREEDING CATEGORY
-    results$BREEDING_CATEGORY <- breeding_codes$category_name[
-      match(results$BREEDING_CODE, breeding_codes$code)
+  records <- aggregate_ebd_data(pipeline)
+
+  if (nrow(records) > 0) {
+    
+    print(paste(nrow(records), "records found"))
+    # ADD BREEDING CATEGORY NAME
+    records$BREEDING_CATEGORY <- breeding_codes$category_name[
+      match(records$BREEDING_CODE, breeding_codes$code)
     ]
 
     # add ecoregion if county present
-    results <- add_ecoregion_to_df(results)
-
+    records <- add_ecoregion_to_df(records)
+  
     # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
-    results <- results %>%
+    records <- records %>%
       mutate(
         EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
       )
     # add species code review data
-    results <- add_species_codes_to_df(results, species)
-    }
+    records <- add_species_codes_to_df(records, species)
 
+
+    ## FACTORIZE BREEDING_CODES
+    records$BREEDING_CODE <- factor(
+      records$BREEDING_CODE,
+      levels = code_levels_boxplot
+    )
+
+    ## ADD FILTER FIELDS
+    # get species review information
+    spp_info <- species_codes[species_codes$SPECIES == species, ]
+    spp_info_row <- spp_info[1, ]
+    sd_start_julian <- spp_info_row[, "SAFE_DATE_START_JD"]
+    sd_end_julian <- spp_info_row[, "SAFE_DATE_END_JD"]
+    status <- spp_info_row[, "NC_STATUS"]
+
+    records <- records %>%
+    mutate(
+        CHECK_FLAGGED = SUITABILITY == "F",
+        CHECK_UNSUITABLE = SUITABILITY == "U",
+        CHECK_SUITABLE = SUITABILITY == "S",
+        CHECK_SAFE_DATES = JULIAN_DAY >=
+          sd_start_julian & JULIAN_DAY <= sd_end_julian,
+        CHECK_UNREVIEWED = !(NCBA_REVIEWED)
+      )
+
+    results <- list(
+      "success" = TRUE,
+      "records" = records,
+      "spp_info" = spp_info,
+      "sd_start_julian" = sd_start_julian,
+      "sd_end_julian" = sd_end_julian,
+      "status" = status
+    )
+
+  } else {
+    results <- list(
+      "success" = FALSE
+    )
+  }
+
+    ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    # add REVIEW_STATUS field
+    # R = reviewed (NCBA_REVIEW present)
+    # U = unreviewed (NCBA_REVIEW not present)
+
+    # add FLAG field - used to format table, map, boxplot points
+    # all combos of the following:
+    # outside safe dates
+    # outside breeding range
+    # flagged spp/code combo
+    # unsuitable spp/code combo
+
+    # REVIEW_STATUS = R should trump any other formatting
+
+    ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   return(results)
 }
 
-default_obs_project <- paste0('{
-    "SEI" : "$SAMPLING_EVENT_IDENTIFIER",
-    "GUID" : "$OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER",
-    "OBSERVATION_DATE" : 1,
-    "JULIAN_DAY" : "$NCBA_JULIAN_DAY",
-    "TIME_OBSERVATIONS_STARTED" : 1,
-    "COUNTY" : 1,
-    "ID_NCBA_BLOCK" : 1,
-    "OBSERVER_ID" : 1,
-    "NCBA_OBSERVER" : 1,
-    "PROTOCOL_TYPE" : 1,
-    "DURATION_MINUTES" : 1,
-    "EFFORT_DISTANCE_KM" : 1,
-    "NUMBER_OBSERVERS" : 1,
-    "COMMON_NAME" : "$OBSERVATIONS.COMMON_NAME",
-    "SCIENTFIC_NAME" : "$OBSERVATIONS.SCIENTIFIC_NAME",
-    "BREEDING_CODE" : "$OBSERVATIONS.BREEDING_CODE",
-    "BREEDING_CATEGORY" : "$OBSERVATIONS.BREEDING_CATEGORY",
-    "BEHAVIOR_CODE" : "$OBSERVATIONS.BEHAVIOR_CODE",
-    "SPECIES_COMMENTS" : "$OBSERVATIONS.SPECIES_COMMENTS",
-    "HAS_MEDIA" : "$OBSERVATIONS.HAS_MEDIA",
-    "LOCALITY" : 1,
-    "LATITUDE": 1,
-    "LONGITUDE" : 1,
-    "NCBA_REVIEW" : 1,
-    "_id" : 0
-  }'
-)
 
 # get_obs_record <- function(GUID, project = default_obs_project) {
 #   # Retrieve observation data record
@@ -311,67 +351,52 @@ default_obs_project <- paste0('{
 #   return(results[1,])
 
 # }
-get_obs_records <- function(guids, species, project = default_obs_project) {
-  # Retrieve observation data record
-  #
-  # Description:
-  #   Returns records resulting from the passed aggregation pipeline
-  #
-  # Arguments:
-  # GUID -- list of guids
-  # project -- valid JSON of fields to be returned
+# get_obs_records <- function(guids, species, project = default_obs_project) {
+#   # Retrieve observation data record
+#   #
+#   # Description:
+#   #   Returns records resulting from the passed aggregation pipeline
+#   #
+#   # Arguments:
+#   # GUID -- list of guids
+#   # project -- valid JSON of fields to be returned
 
-  # compile filter list
-  guid_list <- '['
-  for (o in guids) {
-    guid_list <- paste0(guid_list, '"', o, '",')
-  }
-  guid_list <- substr(guid_list, 1, nchar(guid_list) - 1)
-  guid_list <- paste0(guid_list, "]")
+#   # compile filter list
+#   guid_list <- '['
+#   for (o in guids) {
+#     guid_list <- paste0(guid_list, '"', o, '",')
+#   }
+#   guid_list <- substr(guid_list, 1, nchar(guid_list) - 1)
+#   guid_list <- paste0(guid_list, "]")
 
-  pipeline <- paste0(
-    '[
-      {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
-      "$in" : ', guid_list, '}}},
-      {"$unwind" : {"path" : "$OBSERVATIONS"}},
-      {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
-      "$in" : ', guid_list, '}}},
-      {"$project": ', project, '}
-    ]'
-  )
+#   pipeline <- paste0(
+#     '[
+#       {"$match" : {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
+#       "$in" : ', guid_list, '}}},
+#       {"$unwind" : {"path" : "$OBSERVATIONS"}},
+#       {"$match": {"OBSERVATIONS.GLOBAL_UNIQUE_IDENTIFIER" : {
+#       "$in" : ', guid_list, '}}},
+#       {"$project": ', project, '}
+#     ]'
+#   )
 
-  results <- aggregate_ebd_data(pipeline)
+#   results <- aggregate_ebd_data(pipeline)
 
-  # add ecoregion if county present
-  results <- add_ecoregion_to_df(results)
+#   # add ecoregion if county present
+#   results <- add_ecoregion_to_df(results)
 
-  # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
-  results <- results %>%
-    mutate(
-      EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
-    )
-  # add species code review data
-  results <- add_species_codes_to_df(results, species)
+#   # ADD EBIRD LINK AND JOIN WITH SPECIES CODES
+#   results <- results %>%
+#     mutate(
+#       EBIRD_LINK = paste0("https://ebird.org/checklist/", SEI)
+#     )
+#   # add species code review data
+#   results <- add_species_codes_to_df(results, species)
   
-  ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  # add REVIEW_STATUS field
-  # R = reviewed (NCBA_REVIEW present)
-  # U = unreviewed (NCBA_REVIEW not present)
 
-  # add FLAG field - used to format table, map, boxplot points
-  # all combos of the following:
-  # outside safe dates
-  # outside breeding range
-  # flagged spp/code combo
-  # unsuitable spp/code combo
+#   return(results)
 
-  # REVIEW_STATUS = R should trump any other formatting
-
-  ##!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-  return(results)
-
-}
+# }
 
 #############################################################################
 # BLOCKS
@@ -414,7 +439,11 @@ add_ecoregion_to_df <- function(df) {
 add_species_codes_to_df <- function(df, species) {
   selected_species_codes <- species_codes[
     species_codes$SPECIES == species,
-  ]
+  ] %>%
+    select(
+      "BREEDING_CODE", "SUITABILITY", "ECOREGION", "BBA_REASON", "NOTES"
+    )
+
   if (
     "ECOREGION" %in% names(df) &&
     "BREEDING_CODE" %in% names(df)
@@ -422,7 +451,8 @@ add_species_codes_to_df <- function(df, species) {
       df <- df %>%
         merge(
           selected_species_codes,
-          by = c("BREEDING_CODE", "ECOREGION")
+          by = c("BREEDING_CODE", "ECOREGION"),
+          all.x = TRUE
         )
     }
 
@@ -437,3 +467,26 @@ bba_review_reason_list <- c("", bba_review_reasons$reason)
 
 species_codes <- read.csv("ncba_species_codes.csv")
 
+# change blank suitability to S by default
+# consider changing for production
+species_codes$SUITABILITY[species_codes$SUITABILITY == ""] <- "S"
+
+
+#############################################################################
+# Get Species List
+# get_spp_list <- function(query = "{}", filter = "{}" ) {
+
+#   mongodata <- m_spp$find(query, filter)
+
+#   return(mongodata)
+# }
+
+# species_list <- sort(
+#   get_spp_list(
+#     query = '{"NC_STATUS":"definitive"}',
+#     filter = '{"PRIMARY_COM_NAME":1}'
+#   )$PRIMARY_COM_NAME, decreasing = FALSE
+# )
+
+species_list <- sort(unique(species_codes$SPECIES))
+species_list <- c("", species_list) # add blank for select list

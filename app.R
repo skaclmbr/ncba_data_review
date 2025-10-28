@@ -320,7 +320,7 @@ server <- function(input, output, session) {
     print(input$suitability_select)
     if (input$suitability_select != "A") {
       # suitability_values <- c(input$suitability_select)
-      suitability_values <- c("U")
+      suitability_values <- c(input$suitability_select)
     }
 
     form_data$filtered_obs <- form_data$all_obs_data %>%

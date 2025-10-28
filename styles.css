@@ -73,6 +73,6 @@ h5 {
     display: inline-block;
 }
 
-#obs-detail {
+.obs-detail {
     padding-bottom: 10px;
 }

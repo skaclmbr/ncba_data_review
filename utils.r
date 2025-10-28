@@ -3,9 +3,9 @@
 percent <- function(num, digits = 2, multiplier = 100, ...) {
   percentage <- formatC(num * multiplier, format = "f", digits = digits, ...)
 
-  # appending "%" symbol at the end of 
-  # calculate percentage value 
-  paste0(percentage, "%") 
+  # appending "%" symbol at the end of
+  # calculate percentage value
+  paste0(percentage, "%")
 }
 
 dec_places <- function(num, digits = 2, ...) {
@@ -18,8 +18,8 @@ dec_places <- function(num, digits = 2, ...) {
 # this is a read only account
 HOST = "cluster0-shard-00-00.rzpx8.mongodb.net:27017"
 DB = "ebd_mgmt"
-COLLECTION = "ebd_test" # testing
-# COLLECTION = "ebd" # production
+# COLLECTION = "ebd_test" # testing
+COLLECTION = "ebd" # production
 source("ncba_config.r")
 # other relevant collections include: blocks and ebd_taxonomy
 
@@ -277,9 +277,9 @@ get_observations <- function(species) {
         CHECK_FLAGGED = SUITABILITY == "F",
         CHECK_UNSUITABLE = SUITABILITY == "U",
         CHECK_SUITABLE = SUITABILITY == "S",
-        CHECK_SAFE_DATES = JULIAN_DAY >=
-          sd_start_julian & JULIAN_DAY <= sd_end_julian,
-        CHECK_UNREVIEWED = !(NCBA_REVIEWED)
+        CHECK_SAFE_DATES = JULIAN_DAY <=
+          sd_start_julian | JULIAN_DAY >= sd_end_julian,
+        CHECK_UNREVIEWED = NCBA_REVIEWED
       )
 
     results <- list(
@@ -290,6 +290,7 @@ get_observations <- function(species) {
       "sd_end_julian" = sd_end_julian,
       "status" = status
     )
+    print(paste("results.sd_start_julian:", sd_start_julian))
 
   } else {
     results <- list(

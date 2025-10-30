@@ -18,8 +18,8 @@ dec_places <- function(num, digits = 2, ...) {
 # this is a read only account
 HOST = "cluster0-shard-00-00.rzpx8.mongodb.net:27017"
 DB = "ebd_mgmt"
-# COLLECTION = "ebd_test" # testing
-COLLECTION = "ebd" # production
+COLLECTION = "ebd_test" # testing
+# COLLECTION = "ebd" # production
 source("ncba_config.r")
 # other relevant collections include: blocks and ebd_taxonomy
 

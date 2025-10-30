@@ -20,6 +20,8 @@ if(!require(mongolite)) install.packages(
   "mongolite", repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages(
   "ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(ggbeeswarm)) install.packages(
+  "ggbeeswarm", repos = "http://cran.us.r-project.org")
 if(!require(ggiraph)) install.packages(
   "ggiraph", repos = "http://cran.us.r-project.org")
 if(!require(ggridges)) install.packages(
@@ -504,14 +506,15 @@ server <- function(input, output, session) {
             )
           ) +
           labs(y = "Breeding Code", x = "Julian Day") +
-          geom_boxplot(
-            aes(
-              x = JULIAN_DAY,
-              y = BREEDING_CODE,
-              fill = BREEDING_CATEGORY
-            ),
-            show.legend = FALSE
-          ) +
+          # geom_boxplot(
+          #   aes(
+          #     x = JULIAN_DAY,
+          #     y = BREEDING_CODE,
+          #     fill = BREEDING_CATEGORY
+          #   ),
+          #   show.legend = FALSE
+          # ) +
+
           scale_fill_manual(values = categorycolors) +
           geom_point_interactive(
             aes(

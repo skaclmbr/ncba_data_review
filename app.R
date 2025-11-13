@@ -20,12 +20,8 @@ if(!require(mongolite)) install.packages(
   "mongolite", repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages(
   "ggplot2", repos = "http://cran.us.r-project.org")
-if(!require(ggbeeswarm)) install.packages(
-  "ggbeeswarm", repos = "http://cran.us.r-project.org")
 if(!require(ggiraph)) install.packages(
   "ggiraph", repos = "http://cran.us.r-project.org")
-if(!require(ggridges)) install.packages(
-  "ggridges", repos = "http://cran.us.r-project.org")
 if(!require(dplyr)) install.packages(
   "dplyr", repos = "http://cran.us.r-project.org")
 if(!require(DT)) install.packages(
@@ -35,6 +31,10 @@ if(!require(stringr)) install.packages(
 
 if(!require(leaflet)) install.packages(
   "leaflet", repos = "http://cran.us.r-project.org")
+if(!require(sf)) install.packages(
+  "sf", repos = "http://cran.us.r-project.org")
+# if(!require(mapedit)) install.packages(
+#   "mapedit", repos = "http://cran.us.r-project.org")
 if(!require(leaflegend)) install.packages(
   "leaflegend", repos = "http://cran.us.r-project.org")
 if(!require(paletteer)) install.packages(
@@ -55,6 +55,13 @@ category_colors <- c("#6a51a3", "#9e9ac8", "#cbc9e2", "#F2F0F7")
 breeding_category_pal <- colorFactor(
   palette = category_colors,
   domain = breeding_categories
+)
+
+category_cols <- c(
+  "Confirmed" = "#6a51a3",
+  "Probable" = "#9e9ac8",
+  "Possible" = "#cbc9e2",
+  "Observed" = "#F2F0F7"
 )
 
 # Helper function to create a mandatory label
@@ -141,7 +148,7 @@ ui <- fluidPage(
         #   ),
         #   multiple = TRUE
         # ),
-        uiOutput("records_found"),
+        # uiOutput("records_found"),
       ),
       card(
         card_header("Observation Detail"),
@@ -155,7 +162,8 @@ ui <- fluidPage(
           card_header(uiOutput("obs_list_header")),
           class = "mt-2",
           card(
-            DTOutput("selected_obs_table")
+            # uiOutput("selected_obs_table")
+            DTOutput("selected_obs_table") # table code
           ),
           actionButton("clear_observation_list", "Clear List"),
           card(
@@ -487,49 +495,49 @@ server <- function(input, output, session) {
 
     ###############################
     ## Add observations to the boxplot
+    unreview_cols <- c("FALSE" = "#444444", "TRUE" = "red")
     output$boxplot <- renderGirafe(
       {
         gg_point <- ggplot(
           data = od,
           aes(
             x = JULIAN_DAY,
-            y = BREEDING_CODE,
+            y = BREEDING_CODE
+            # color = BREEDING_CATEGORY
           )
         ) +
-          geom_vline(
-            linetype = "dashed",
-            color = "gray",
-            size = 1,
-            xintercept = c(
-              form_data$species_safe_date_start_jd,
-              form_data$species_safe_date_end_jd
-            )
-          ) +
-          labs(y = "Breeding Code", x = "Julian Day") +
-          # geom_boxplot(
-          #   aes(
-          #     x = JULIAN_DAY,
-          #     y = BREEDING_CODE,
-          #     fill = BREEDING_CATEGORY
-          #   ),
-          #   show.legend = FALSE
-          # ) +
-
-          scale_fill_manual(values = categorycolors) +
+          # scale_fill_manual(values = categorycolors) +
           geom_point_interactive(
             aes(
-              x = JULIAN_DAY,
-              y = BREEDING_CODE,
+            #   x = JULIAN_DAY,
+            #   y = BREEDING_CODE,
               tooltip = SEI,
               data_id = GUID,
+              color = factor(CHECK_UNREVIEWED),
+              fill = factor(BREEDING_CATEGORY),
+              stroke = 2,
+              size = 2,
               onclick = paste0(
                 'Shiny.onInputChange("obs_clicked","', GUID, '")'
               ),
             ),
+            shape = 21,
             show.legend = FALSE,
             position = position_jitter(
               width = 0.3,
               height = 0.3
+            )
+          ) +
+          scale_color_manual(values = unreview_cols) +
+          scale_fill_manual(values = category_cols) +
+          labs(y = "Breeding Code", x = "Julian Day") +
+          geom_vline(
+            linetype = "dashed",
+            color = "gray",
+            linewidth = 1,
+            xintercept = c(
+              form_data$species_safe_date_start_jd,
+              form_data$species_safe_date_end_jd
             )
           ) +
           xlim(0, 365) +
@@ -613,7 +621,14 @@ server <- function(input, output, session) {
               BREEDING_CODE, " (", BREEDING_CATEGORY, ")"
             )
           ) %>%
+          mutate(
+            select = paste0(
+              "<input type='checkbox' class='obs_checkbox' data-id='",
+              GUID, "'>"
+            )
+          ) %>%
           select(
+            select,
             "SEI",
             "OBSERVATION_DATE",
             "BREEDING_CODE_CATEGORY",
@@ -626,17 +641,46 @@ server <- function(input, output, session) {
             "LATITUDE",
             "LONGITUDE"
           )
+        # print(head(selected_obs_list))
+        # output$selected_obs_table <- renderUI({
+        #   if (is.null(num_selected_obs) || num_selected_obs < 1) return(NULL)
+
+        #   print("BUILDING HTML for TABLE")
+        #   div(
+        #     id = "selected_obs_table_div",
+        #     div(
+        #       id = "table_header",
+        #       class = "table-header"
+        #     ),
+        #     for (i in seq_len(selected_obs_list)){
+        #       div(
+        #         id = paste0("tblrow-", selected_obs_list$SEI[i]),
+        #         class = "table-row",
+        #         checkboxInput(
+        #           inputId = paste0("tblcheck-", selected_obs_list$SEI[i])
+        #         ),
+        #         div(
+        #           class = "row-data",
+        #           selected_obs_list$SEI[i]
+        #         )
+        #       )
+        #     }
+        #   )
+        # }
+        # )
 
         output$selected_obs_table <- renderDT({
 
           datatable(
             selected_obs_list,
-            selection = "single",
+            selection = "none",
             colnames = c(
-              "", "Checklist", "Date", "Code", "Region", "Comments"
+              "", "Select", "Checklist", "Date", "Code", "Region", "Comments"
             ),
+            escape = FALSE,
             options = list(
               dom = "t",
+              autoWidth = TRUE,
               columnDefs = list(
                 list(
                   className = "dt-center",

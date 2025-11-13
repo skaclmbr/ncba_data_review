@@ -76,3 +76,11 @@ h5 {
 .obs-detail {
     padding-bottom: 10px;
 }
+
+.table-header, .table-row {
+    width: 100%;
+}
+
+.row-data {
+    display: inline-block;
+}

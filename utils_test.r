@@ -41,6 +41,9 @@ m_spp <- mongo(
   url = URI,
   options = ssl_options(weak_cert_validation = T))
 
+
+
+
 # Get Species List
 get_spp_list <- function(query = "{}", filter = "{}" ) {
 

@@ -84,7 +84,7 @@ breeding_codes <- read.csv("breeding_codes.csv")
 #   )
 code_levels_list <- factor(
   c(
-    "", "No Change", "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
+    "", "No Change", "NC", "F", "H", "S", "S7", "M", "P", "T", "C", "N", "A", "B",
     "PE", "CN", "NB", "DD", "UN", "ON", "FL", "CF", "FY", "FS", "NE", "NY"
   )
 )
@@ -410,7 +410,11 @@ get_blocks <- function() {
       "ID_BLOCK_CODE" : 1,
       "PRIORITY" : 1,
       "ID_EBD_NAME" : 1,
-      "ECOREGION" : 1
+      "ECOREGION" : 1,
+      "NW_X" : 1,
+      "NW_Y" : 1,
+      "SE_X" : 1,
+      "SE_Y" : 1
     }'
   )
 
@@ -420,11 +424,23 @@ get_blocks <- function() {
 }
 
 block_data <- get_blocks()
+block_data_sf <- block_data %>%
+  mutate(
+    wkt = paste0(
+      "POLYGON((", SE_X, " ", SE_Y, ", ",
+      SE_X, " ", NW_Y, ", ", NW_X, " ",
+      NW_Y, ", ", NW_X, " ", SE_Y, ", ",
+      SE_X, " ", SE_Y, "))"
+    )
+  )
+block_data_sf <- st_as_sf(block_data_sf, wkt = "wkt", crs = 4326)
+
 county_ecoregion <- block_data %>%
   distinct(COUNTY, ECOREGION) %>%
   filter(COUNTY != "") %>%
   mutate(COUNTY_TITLE = str_to_title(COUNTY))
 block_list <- list("")
+
 
 add_ecoregion_to_df <- function(df) {
 
@@ -475,19 +491,6 @@ species_codes$SUITABILITY[species_codes$SUITABILITY == ""] <- "S"
 
 #############################################################################
 # Get Species List
-# get_spp_list <- function(query = "{}", filter = "{}" ) {
-
-#   mongodata <- m_spp$find(query, filter)
-
-#   return(mongodata)
-# }
-
-# species_list <- sort(
-#   get_spp_list(
-#     query = '{"NC_STATUS":"definitive"}',
-#     filter = '{"PRIMARY_COM_NAME":1}'
-#   )$PRIMARY_COM_NAME, decreasing = FALSE
-# )
 
 species_list <- sort(unique(species_codes$SPECIES))
 species_list <- c("", species_list) # add blank for select list
